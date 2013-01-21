@@ -91,6 +91,7 @@ handle_message(Message=#mqtt_connect{client_id=ClientId, username=Username},
 				ok ->
 					% The client is authorized.
 					% Now bind with the session or create a new one.
+					fubar_log:access(?MODULE, [ClientId, "authorized", Username]),
 					bind_session(Message, State);
 				{error, not_found} ->
 					fubar_log:warning(?MODULE, [ClientId, "wrong username", Username]),
