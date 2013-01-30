@@ -5,6 +5,10 @@ applications.
 == Getting Started ==
 1. Getting dependencies and building
 	$ make deps
+	$ cp ranch.patch deps/ranch
+	$ cd deps/ranch
+	$ patch -p1 < ranch.patch
+	$ cd ../..
 	$ make
 	
 2. Starting a broker in interactive mode

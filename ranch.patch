@@ -1,0 +1,42 @@
+diff --git a/src/ranch_acceptor.erl b/src/ranch_acceptor.erl
+index 63d24c8..0a5ec81 100644
+--- a/src/ranch_acceptor.erl
++++ b/src/ranch_acceptor.erl
+@@ -52,19 +52,25 @@ loop(LSocket, Transport, Protocol, MaxConns, Opts, ListenerPid, ConnsSup) ->
+ 				MaxConns, Opts, ListenerPid, ConnsSup);
+ 		%% Found my sockets!
+ 		{accept, CSocket} ->
+-			{ok, ConnPid} = supervisor:start_child(ConnsSup,
+-				[ListenerPid, CSocket, Transport, Protocol, Opts]),
+-			Transport:controlling_process(CSocket, ConnPid),
+-			ConnPid ! {shoot, ListenerPid},
+-			{ok, MaxConns2} = case MaxConns of
+-				infinity ->
+-					{ok, infinity};
++			case supervisor:start_child(ConnsSup,
++				[ListenerPid, CSocket, Transport, Protocol, Opts]) of
++				{ok, ConnPid} ->
++					Transport:controlling_process(CSocket, ConnPid),
++					ConnPid ! {shoot, ListenerPid},
++					{ok, MaxConns2} = case MaxConns of
++						infinity ->
++							{ok, infinity};
++						_ ->
++							NbConns = ranch_listener:add_connection(ListenerPid, ConnPid),
++							maybe_wait(ListenerPid, MaxConns, NbConns)
++					end,
++					?MODULE:init(LSocket, Transport, Protocol,
++						MaxConns2, Opts, ListenerPid, ConnsSup);
+ 				_ ->
+-					NbConns = ranch_listener:add_connection(ListenerPid, ConnPid),
+-					maybe_wait(ListenerPid, MaxConns, NbConns)
+-			end,
+-			?MODULE:init(LSocket, Transport, Protocol,
+-				MaxConns2, Opts, ListenerPid, ConnsSup);
++					catch Transport:close(CSocket),
++					?MODULE:init(LSocket, Transport, Protocol,
++						MaxConns, Opts, ListenerPid, ConnsSup)
++			end;
+ 		%% Upgrade the max number of connections allowed concurrently.
+ 		{set_max_conns, MaxConns2} ->
+ 			?MODULE:loop(LSocket, Transport, Protocol,

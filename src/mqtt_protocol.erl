@@ -69,7 +69,9 @@ start_link(Listener, Socket, Transport, Options) ->
 	case fubar_alarm:is_alarmed() of
 		true ->
 			Transport:close(Socket),
-			{error, overload};
+			Stop = {error, overload},
+			fubar_log:error(?MODULE, Stop),
+			Stop;
 		_ ->
 			Settings = fubar:settings(?MODULE),
 			State = ?PROPS_TO_RECORD(Settings ++ Options, ?MODULE),
