@@ -28,18 +28,19 @@
          
          %% fubar_log settings control logging behavior.
          %% This section can't be changed at runtime.
-         %% Use fubar_log:open/1, close/1, show/1 and hide/1 functions instead.
+         %% Use fubar_log:open/1, close/1, out/1 and out/2 functions instead.
          {fubar_log, [{dir, "priv/log"},
-                      {max_bytes, 1024000},		% 1MB per file
-                      {max_files, 10},			% 10 files per log class
-					  {distributed, true},		% Use distibuted logging
-                      {interval, 10},			% Redirect every 10ms
+                      {max_bytes, 102400000},	% 100MB per file
+                      {max_files, 10},		% 10 files per class
+                      {interval, 10},		% Log redirect every 10 ms
+                      {distributed, false},	% Whether to use distributed logging or not.
                       % {classes, [{access, "fubar"}, {packet, none},
                       %            {protocol, none}, {resource, none},
                       %            {debug, none}, {info, none}, {warning, "fubar"},
                       %            {error, "fubar"}, {trace, standard_io}]}
-                      {classes, [{access, none}, {resource, none}, {trace, standard_io},
-							     {info, none}, {warning, standard_io}, {error, standard_io}]}
+                      {classes, [{access, "fubar"}, {resource, "fubar"},
+                                 {protocol, "fubar"}, {trace, "fubar"},
+                                 {info, "fubar"}, {warning, "fubar"}, {error, "fubar"}]}
                      ]},
          
          %% vm_memory_monitor settings control floodline behavior.
@@ -52,13 +53,14 @@
          %% mqtt_protocol settings control mqtt receiver/parser behavior.
          %% This section can be changed at runtime by fubar:settings/2.
          {mqtt_protocol, [
-                          {max_packet_size, 4096},
+                          %% Maximum variable header + payload size per mqtt message.
+                          {max_packet_size, 4096}, % 8kB
                           
                           %% Socket buffers are set small to accept a lot of clients.
-                          {socket_options, [{recbuf, 4096}, {sndbuf, 4096}]},
+                          {socket_options, [{recbuf, 4096}, {sndbuf, 4096}]}, % 8kB each
                           
                           %% Socket buffers for selected clients are set larger to give more bandwidth.
-                          {acl_socket_options, [{recbuf, 262144}, {sndbuf, 262144}]},
+                          {acl_socket_options, [{recbuf, 1048576}, {sndbuf, 1048576}]}, % 512kB each
                           
                           %% Access control list module.
                           {acl, mqtt_acl},
@@ -71,25 +73,28 @@
          %% This section can be changed at runtime by fubar:settings/2.
          {mqtt_server, [
                         %% The broker closes the connection if a client doesn't send an mqtt connect within given time.
-                        {timeout, 3000},
+                        {timeout, 3000}, % 3s
                         
                         %% mqtt spec states that a client should specify keep-alive value in mqtt connect.
                         %% But this broker suggests different keep-alive value in mqtt connack
                         %% if the keep-alive value specified by the client is too small or too big.
                         %% This is not compliant to mqtt spec but a useful extension.
                         %% Set this range wide enough if you don't want the extension.
-                        {valid_keep_alive, {60, 3600}}
+                        {valid_keep_alive, {60, 3600}}, % 1 min ~ 1h
                         
                         %% Module:verify/2 function is used to verify credential in mqtt connect.
                         %% Uncomment the line below to enable authentication.
-                        % {auth, mqtt_account}
+                        {auth, mqtt_account}
                        ]},
          
          %% mqtt_session settings control mqtt session behavior.
          %% This section can be changed at runtime by fubar:settings/2.
          {mqtt_session, [
+                         %% Offline sessions are expired after some time.
+                         {max_age, 172800000}, % 2 days
+                         
                          %% It drops transactions that are not complete within given time.
-                         {transaction_timeout, 60000},
+                         {transaction_timeout, 60000}, % 1 min
                          
                          %% It stores mqtt messages for temporarily offline clients.
                          %% But the number of offline messages are limited.
@@ -98,7 +103,7 @@
                          %% It sends duplicate mqtt messages to a client for higher qos.
                          %% Retry interval and maximum number of retries are set in prior.
                          {max_retries, 5},
-                         {retry_after, 10000}]},
+                         {retry_after, 10000}]}, % 10s
          
          {mqtt_topic, []}
         ]}

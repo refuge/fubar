@@ -1,4 +1,4 @@
-.SILENT: state stop
+.SILENT: state stop acl-all acl-get acl-set acl-del account-all account-get account-set account-del
 
 ###############################################################################
 ## Make parameters
@@ -7,7 +7,7 @@ mqtt_port=1883
 mqtts_port=undefined
 node=fubar
 master=undefined
-cookie=sharedsecretamongnodesofafubarcluster_youneedtochangethisforsecurity
+cookie=sharedsecretamongnodes
 # ssh_host=localhost
 # ssh_port=22
 
@@ -40,13 +40,51 @@ run: compile
 			-mnesia dir '\"$(CURDIR)/priv/data/$(node)\"' \
 			-env MQTT_PORT $(mqtt_port) -env MQTTS_PORT $(mqtts_port) -env FUBAR_MASTER $(master)"
 
+stop:
+	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+		-s fubar_control call $(node)@`hostname -s` stop
+
 state:
 	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` state
 
-stop:
+acl-all:
 	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
-		-s fubar_control call $(node)@`hostname -s` stop
+		-s fubar_control call $(node)@`hostname -s` acl all
+
+ip=127.0.0.1
+allow=true
+
+acl-get:
+	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+		-s fubar_control call $(node)@`hostname -s` acl get $(ip)
+
+acl-set:
+	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+		-s fubar_control call $(node)@`hostname -s` acl set $(ip) $(allow)
+
+acl-del:
+	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+		-s fubar_control call $(node)@`hostname -s` acl del $(ip)
+
+account-all:
+	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+		-s fubar_control call $(node)@`hostname -s` account all
+
+username=undefined
+password=undefined
+
+account-get:
+	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+		-s fubar_control call $(node)@`hostname -s` account get $(username)
+
+account-set:
+	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+		-s fubar_control call $(node)@`hostname -s` account set $(username) $(password)
+
+account-del:
+	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+		-s fubar_control call $(node)@`hostname -s` account del $(username)
 
 # Debug running program in production mode.
 debug:

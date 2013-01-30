@@ -269,4 +269,6 @@ The above sample shows changing maximum MQTT packet size to 8kB.  This change
 affects all the clients connection from this point on.  Note that some change
 applies immediately but others require further intervention.
 
-Refer src/fubar.app.src for details.
+== Some more handy scripts ==
+There are some utility rules in Makefile such as, make account-* and make acl-*.  Read the Makefile for more info.
+

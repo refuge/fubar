@@ -38,7 +38,7 @@ start_link() ->
 -spec start_child(module(), proplist(atom(), term())) -> pid() | {error, reason()}.
 start_child(Module, Props) ->
 	Id = proplists:get_value(client_id, Props),
-	Spec = {Id, {Module, start_link, [Props]}, transient, 10, worker, dynamic},
+	Spec = {Id, {Module, start_link, [Props]}, transient, brutal_kill, worker, dynamic},
 	case supervisor:start_child(?MODULE, Spec) of
 		{ok, Pid} -> Pid;
 		Error -> Error

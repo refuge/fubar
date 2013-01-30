@@ -68,6 +68,7 @@ start_link(Listener, Socket, Transport, Options) ->
 	% Apply settings from the application metadata.
 	case fubar_alarm:is_alarmed() of
 		true ->
+			Transport:close(Socket),
 			{error, overload};
 		_ ->
 			Settings = fubar:settings(?MODULE),
@@ -384,7 +385,7 @@ parse(State=#?MODULE{header=Header, buffer=Buffer})
 	case catch read_payload(Header, Buffer) of
 		{ok, Message, Rest} ->
 			% Copy the buffer to prevent the binary from increasing indefinitely.
-			{ok, Message, State#?MODULE{header=undefined, buffer=binary:copy(Rest, 1)}};
+			{ok, Message, State#?MODULE{header=undefined, buffer=Rest}};
 		{'EXIT', From, Reason} ->
 			{error, {'EXIT', From, Reason}}
 	end;
@@ -442,39 +443,39 @@ read_payload(Header=#mqtt_header{type=Type, size=Size}, Buffer) ->
 	<<Payload:Size/binary, Rest/binary>> = Buffer,
 	Message = case Type of
 				  mqtt_reserved ->
-					  read_reserved(Header, Payload);
+					  read_reserved(Header, binary:copy(Payload));
 				  mqtt_connect ->
-					  read_connect(Header, Payload);
+					  read_connect(Header, binary:copy(Payload));
 				  mqtt_connack ->
-					  read_connack(Header, Payload);
+					  read_connack(Header, binary:copy(Payload));
 				  mqtt_publish ->
-					  read_publish(Header, Payload);
+					  read_publish(Header, binary:copy(Payload));
 				  mqtt_puback ->
-					  read_puback(Header, Payload);
+					  read_puback(Header, binary:copy(Payload));
 				  mqtt_pubrec ->
-					  read_pubrec(Header, Payload);
+					  read_pubrec(Header, binary:copy(Payload));
 				  mqtt_pubrel ->
-					  read_pubrel(Header, Payload);
+					  read_pubrel(Header, binary:copy(Payload));
 				  mqtt_pubcomp ->
-					  read_pubcomp(Header, Payload);
+					  read_pubcomp(Header, binary:copy(Payload));
 				  mqtt_subscribe ->
-					  read_subscribe(Header, Payload);
+					  read_subscribe(Header, binary:copy(Payload));
 				  mqtt_suback ->
-					  read_suback(Header, Payload);
+					  read_suback(Header, binary:copy(Payload));
 				  mqtt_unsubscribe ->
-					  read_unsubscribe(Header, Payload);
+					  read_unsubscribe(Header, binary:copy(Payload));
 				  mqtt_unsuback ->
-					  read_unsuback(Header, Payload);
+					  read_unsuback(Header, binary:copy(Payload));
 				  mqtt_pingreq ->
-					  read_pingreq(Header, Payload);
+					  read_pingreq(Header, binary:copy(Payload));
 				  mqtt_pingresp ->
-					  read_pingresp(Header, Payload);
+					  read_pingresp(Header, binary:copy(Payload));
 				  mqtt_disconnect ->
-					  read_disconnect(Header, Payload);
+					  read_disconnect(Header, binary:copy(Payload));
 				  _ ->
 					  undefined
 			  end,
-	{ok, Message, Rest}.
+	{ok, Message, binary:copy(Rest)}.
 
 read_connect(_Header,
 			 <<ProtocolLength:16/big-unsigned, Protocol:ProtocolLength/binary,

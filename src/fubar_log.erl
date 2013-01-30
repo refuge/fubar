@@ -56,7 +56,7 @@ start_link() ->
 	[Name | _] = string:tokens(lists:flatten(io_lib:format("~s", [node()])), "@"),
 	Path = filename:join(State#?MODULE.dir, Name),
 	ok = filelib:ensure_dir(Path++"/"),
-	gen_server:start({local, ?MODULE}, ?MODULE, State#?MODULE{dir=Path}, []).
+	gen_server:start_link({local, ?MODULE}, ?MODULE, State#?MODULE{dir=Path}, []).
 
 %% @doc Access log records client connect/disconnect events.
 -spec access(module(), term()) -> ok | {error, reason()}.

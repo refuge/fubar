@@ -33,6 +33,6 @@ start_link() ->
 %%
 init(_) ->
 	alarm_handler:add_alarm_handler(fubar_alarm, []),
-	LogManager = {fubar_log, {fubar_log, start_link, []}, permanent, 10, worker, dynamic},
-	MemoryMonitor = {vm_memory_monitor, {vm_memory_monitor, start_link, []}, permanent, 10, worker, dynamic},
+	LogManager = {fubar_log, {fubar_log, start_link, []}, permanent, brutal_kill, worker, dynamic},
+	MemoryMonitor = {vm_memory_monitor, {vm_memory_monitor, start_link, []}, permanent, brutal_kill, worker, dynamic},
 	{ok, {{one_for_one, ?MAX_R, ?MAX_T}, [LogManager, MemoryMonitor]}}.
