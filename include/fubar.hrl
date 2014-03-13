@@ -11,15 +11,17 @@
 -type ipv6addr() :: {word(),word(),word(),word(),word(),word(),word(),word()}.
 -type ipport() :: word().
 -type nwaddr() :: {hostname(),ipport()} | {ipaddr(),ipport()}.
+-type socket() :: port().
+-type param() :: {atom(), term()}.
 -type proplist(Key, Value) :: [{Key, Value} | Key].
--type reason() :: term().
+-type params() :: proplist(atom(), term()).
 -type word() :: 0..65535.
 -type timestamp() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 
 -record(fubar, {id :: term(),
-				origin :: term() | {term(), timestamp()},
 				from :: term() | {term(), timestamp()},
-				to :: term() | {term(), timestamp()},
 				via :: term() | {term(), timestamp()},
-				ttl = 10 :: non_neg_integer(),
+				to :: term() | {term(), timestamp()},
 				payload :: term()}).
+
+-type fubar() :: #fubar{}.

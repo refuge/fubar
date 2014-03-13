@@ -10,21 +10,15 @@
 -behaviour(supervisor).
 
 %%
-%% Includes
-%%
--include("fubar.hrl").
-
--define(MAX_R, 3).
--define(MAX_T, 5).
-
-%%
 %% Exports
 %%
 -export([start_link/0]).
 -export([init/1]).
 
+-define(MAX_R, 1000).
+-define(MAX_T, 60).
+
 %% @doc Start the supervisor.
--spec start_link() -> {ok, pid()} | {error, reason()}.
 start_link() ->
 	supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
@@ -32,7 +26,27 @@ start_link() ->
 %% Supervisor callbacks
 %%
 init(_) ->
-	alarm_handler:add_alarm_handler(fubar_alarm, []),
-	LogManager = {fubar_log, {fubar_log, start_link, []}, permanent, brutal_kill, worker, dynamic},
-	MemoryMonitor = {vm_memory_monitor, {vm_memory_monitor, start_link, []}, permanent, brutal_kill, worker, dynamic},
-	{ok, {{one_for_one, ?MAX_R, ?MAX_T}, [LogManager, MemoryMonitor]}}.
+	gen_event:add_handler(alarm_handler, fubar_event, []),
+	EventManager = {
+		fubar_event_manager,
+		{gen_event, start_link, [{local, fubar_event_manager}]},
+		permanent, 5000, worker, dynamic
+	},
+	Sysmon = {
+		fubar_sysmon,
+		{fubar_sysmon, start_link, []},
+		permanent, 5000, worker, dynamic
+	},
+	Tid = ets:new(mqtt_stat, [public, ordered_set]),
+	Stat = {
+		mqtt_stat,
+		{mqtt_stat, start_link, [[{tid, Tid}]]},
+		permanent, 5000, worker, dynamic
+	},
+	ClientSup = {
+		mqtt_client_sup,
+		{mqtt_client_sup, start_link, []},
+		permanent, 5000, supervisor, dynamic
+	},
+	{ok, {{one_for_one, ?MAX_R, ?MAX_T},
+		  [EventManager, Sysmon, Stat, ClientSup]}}.

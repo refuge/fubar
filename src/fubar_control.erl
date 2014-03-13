@@ -74,6 +74,10 @@ call([Node, account, del, Username]) ->
 	io:format("~n== ~p account del ~s ==~n", [Node, Username]),
 	io:format("~p~n~n", [catch rpc:call(Node, mqtt_account, delete, [atom_to_binary(Username, utf8)])]),
 	halt();
+call([Node, trace, Name, Value]) ->
+	io:format("~n== ~p trace ~p ~p == ~n", [Node, Name, Value]),
+	io:format("~p~n~n", [catch rpc:call(Node, mqtt_session, trace, [atom_to_binary(Name, utf8), Value])]),
+	halt();
 call(_) ->
 	io:format(standard_error, "Available commands: run, stop, state, acl-all, acl-get, acl-set, acl-del", []),
 	halt().

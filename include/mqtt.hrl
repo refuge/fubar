@@ -26,8 +26,8 @@
 
 -record(mqtt_connect, {protocol = <<"MQIsdp">> :: binary(),
 					   version = 3 :: pos_integer(),
-					   username :: undefined | binary(),
-					   password :: undefined | binary(),
+					   username = <<>> :: binary(),
+					   password = <<>> :: binary(),
 					   will_retain = false :: boolean(),
 					   will_qos = at_most_once :: mqtt_qos(),
 					   will_topic :: undefined | binary(),
@@ -35,18 +35,21 @@
 					   clean_session = false,
 					   keep_alive = 600 :: pos_integer(),
 					   client_id = <<>> :: binary(),
+					   max_recursion = 0 :: integer(),
 					   extra = <<>> :: binary()}).
 
 -record(mqtt_connack, {code = accepted :: accepted | incompatible | id_rejected |
-						   unavailable | forbidden | unauthorized | undefined,
+						   unavailable | forbidden | unauthorized | alt_server | undefined,
+					   alt_server = <<>> :: binary(),
+					   max_recursion = 0 :: integer(),
 					   extra = <<>> :: binary()}).
 
 -record(mqtt_publish, {topic = <<>> :: binary(),
 					   message_id :: undefined | pos_integer(),
-					   payload = <<>> :: binary(),
 					   dup = false:: boolean(),
 					   qos = at_most_once :: mqtt_qos(),
-					   retain = false :: boolean()}).
+					   retain = false :: boolean(),
+					   payload = <<>> :: binary()}).
 
 -record(mqtt_puback, {message_id :: pos_integer(),
 					  extra = <<>> :: binary()}).

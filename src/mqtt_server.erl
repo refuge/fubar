@@ -13,207 +13,336 @@
 %%% -------------------------------------------------------------------
 -module(mqtt_server).
 -author("Sungjin Park <jinni.park@gmail.com>").
+-behavior(mqtt_protocol).
 
 %%
-%% Includes
+%% Exports
 %%
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
+-export([mnesia/1, get_address/0, get_address/1, set_address/1, apply_setting/1]).
+
+%%
+%% mqtt_protocol callbacks
+%%
+-export([init/1, handle_message/2, handle_event/2, terminate/2]).
 
 -include("fubar.hrl").
 -include("mqtt.hrl").
 -include("props_to_record.hrl").
 
-%%
-%% Types and records
-%%
--record(?MODULE, {client_id :: binary(),
-				  auth :: module(),
-				  session :: pid(),
-				  valid_keep_alive :: undefined | {integer(), integer()},
-				  timeout = 10000 :: timeout(),
-				  timestamp :: timestamp()}).
+%% @doc Server address table schema
+-record(mqtt_addr, {node = '_' :: node(),
+					address = '_' :: string()}).
 
--type state() :: #?MODULE{}.
--type event() :: any().
+%% Auto start-up attributes
+-create_mnesia_tables({mnesia, [create_tables]}).
+-merge_mnesia_tables({mnesia, [merge_tables]}).
+-split_mnesia_tables({mnesia, [split_tables]}).
+-apply_setting(apply_setting).
 
-%%
-%% Exports
-%%
--export([init/1, handle_message/2, handle_event/2, terminate/1]).
+-define(MNESIA_TIMEOUT, 10000).
 
-%%
-%% Calback Functions
-%%
+%% @doc Mnesia table manipulations.
+mnesia(create_tables) ->
+	mnesia:create_table(mqtt_addr, [{attributes, record_info(fields, mqtt_addr)},
+									{ram_copies, [node()]}, {type, set}]),
+	ok = mnesia:wait_for_tables([mqtt_addr], ?MNESIA_TIMEOUT),
+	mnesia(verify_tables);
+mnesia(merge_tables) ->
+	{atomic, ok} = mnesia:add_table_copy(mqtt_addr, node(), ram_copies),
+	mnesia(verify_tables);
+mnesia(split_tables) ->
+	mnesia:del_table_copy(mqtt_addr, node());
+mnesia(verify_tables) ->
+	Settings = fubar:settings(?MODULE),
+	set_address(proplists:get_value(address, Settings, "tcp://127.0.0.1:1883")).
 
-%% @doc Initialize the server process.
-%% This is called when the connection is established.
--spec init(proplist(atom(), term())) ->
-		  {reply, mqtt_message(), state(), timeout()} |
-		  {reply_later, mqtt_message(), state(), timeout()} |
-		  {noreply, state(), timeout()} |
-		  {stop, reason()}.
-init(Props) ->
-	DefaultState = ?PROPS_TO_RECORD(fubar:settings(?MODULE), ?MODULE),
-	State = ?PROPS_TO_RECORD(Props, ?MODULE, DefaultState)(),
-	fubar_log:debug(?MODULE, [undefined, init, State]),
+apply_setting({address, Address}) ->
+	set_address(Address);
+apply_setting(_) ->
+	ok.
+
+%% @doc Get address of this node.
+-spec get_address() -> {ok, string()} | {error, not_found}.
+get_address() ->
+	get_address(node()).
+
+%% @doc Get address of a node.
+-spec get_address(node()) -> {ok, string()} | {error, not_found}.
+get_address(Node) ->
+	case mnesia:dirty_read(mqtt_addr, Node) of
+		[#mqtt_addr{address=Address}] -> Address;
+		[] -> {error, not_found}
+	end.
+
+%% @doc Set address of this node.
+-spec set_address(string()) -> ok.
+set_address(Address) ->
+	mnesia:dirty_write(#mqtt_addr{node=node(), address=Address}).	
+
+-define(KEEPALIVE_MULTIPLIER, 2000).
+
+-define (CONTEXT, ?MODULE).
+
+%% mqtt_protocol context
+-record(?CONTEXT, {
+		client_id :: binary(),
+		auth :: module(),
+		session :: pid(),
+		valid_keep_alive = {1800, 3600} :: {MinSec :: integer(), MaxSec :: integer()},
+		when_overloaded = drop :: drop | accept,
+		overloaded=false,
+		load_balancing = none,
+		timeout = 10000 :: timeout(),
+		timestamp :: timestamp()
+}).
+
+-type context() :: #?CONTEXT{}.
+
+-spec init(params()) -> {noreply, context(), timeout()}.
+init(Params) ->
+	Default = ?PROPS_TO_RECORD(fubar:settings(?MODULE), ?CONTEXT),
+	Context = ?PROPS_TO_RECORD(Params, ?CONTEXT, Default)(),
+	lager:debug("initializing with ~p", [Context]),
 	% Don't respond anything against tcp connection and apply small initial timeout.
-	{noreply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout}.
+	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout}.
 
-%% @doc Handle MQTT messages.
-%% This is called when an MQTT message arrives.
--spec handle_message(mqtt_message(), state()) ->
-		  {reply, mqtt_message(), state(), timeout()} |
-		  {reply_later, mqtt_message(), state(), timeout()} |
-		  {noreply, state(), timeout()} |
-		  {stop, reason(), state()}.
-handle_message(Message=#mqtt_connect{client_id=ClientId, username=undefined},
-			   State=#?MODULE{session=undefined, timeout=Timeout, timestamp=Timestamp}) ->
-	fubar_log:protocol(?MODULE, [ClientId, "=>", Message]),
-	case State#?MODULE.auth of
-		undefined ->
-			bind_session(Message, State);
+-spec handle_message(mqtt_message(), context()) ->
+		  {reply, mqtt_message(), context(), timeout()} |
+		  {noreply, context(), timeout()} |
+		  {stop, Reason :: term()}.
+handle_message(Message=#mqtt_connect{protocol= <<"MQIsdp">>, version=3, client_id=ClientId},
+			   Context=#?CONTEXT{session=undefined}) ->
+	lager:info("~p MSG IN ~p", [ClientId, Message]),
+	mqtt_stat:transient(mqtt_connect),
+	case {Context#?CONTEXT.overloaded, Context#?CONTEXT.load_balancing,
+			Context#?CONTEXT.when_overloaded, Message#mqtt_connect.max_recursion > 0} of
+		{true, _, drop, false} ->
+			drop(Message, Context);
+		{true, none, drop, _} ->
+			drop(Message, Context);
+		{_, Node, _, true} when Node =/= none ->
+			offload(Message, get_address(Node), Context);
 		_ ->
-			% Give another chance to connect with right credential again.
-			fubar_log:warning(?MODULE, [ClientId, "no username"]),
-			{reply, mqtt:connack([{code, unauthorized}]), State, timeout(Timeout, Timestamp)}
+			accept(Message, Context)
 	end;
-handle_message(Message=#mqtt_connect{client_id=ClientId, username=Username},
-			   State=#?MODULE{session=undefined, timeout=Timeout}) ->
-	fubar_log:protocol(?MODULE, [ClientId, "=>", Message]),
-	case State#?MODULE.auth of
-		undefined ->
-			bind_session(Message, State);
-		Auth ->
-			% Connection with credential.
-			case Auth:verify(Username, Message#mqtt_connect.password) of
-				ok ->
-					% The client is authorized.
-					% Now bind with the session or create a new one.
-					fubar_log:access(?MODULE, [ClientId, "authorized", Username]),
-					bind_session(Message, State);
-				{error, not_found} ->
-					fubar_log:warning(?MODULE, [ClientId, "wrong username", Username]),
-					{reply, mqtt:connack([{code, id_rejected}]), State#?MODULE{timestamp=now()}, 0};
-				{error, forbidden} ->
-					fubar_log:warning(?MODULE, [ClientId, "wrong password", Username]),
-					{reply, mqtt:connack([{code, forbidden}]), State#?MODULE{timestamp=now()}, 0};
-				Error ->
-					fubar_log:error(?MODULE, ["error in auth module", Auth, Error]),
-					{reply, mqtt:connack([{code, unavailable}]), State#?MODULE{timestamp=now()}, Timeout}
-			end
-	end;
-handle_message(Message, State=#?MODULE{session=undefined}) ->
+handle_message(Message=#mqtt_connect{client_id=ClientId},
+				Context=#?CONTEXT{session=undefined})->
+	lager:info("~p MSG IN ~p", [ClientId, Message]),
+	mqtt_stat:transient(mqtt_connect),
+	Reply = mqtt:connack([{code, incompatible}]),
+	mqtt_stat:transient(mqtt_connack),
+	lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+	{reply, Reply, Context#?CONTEXT{timestamp=os:timestamp()}, 0};
+handle_message(Message, Context=#?CONTEXT{session=undefined}) ->
 	% All the other messages are not allowed without session.
-	fubar_log:protocol(?MODULE, [undefined, "=>", Message]),
-	fubar_log:warning(?MODULE, [Message, "before mqtt_connect{}"]),
-	{stop, normal, State#?MODULE{timestamp=now()}};
-handle_message(Message=#mqtt_pingreq{}, State) ->
+	lager:warning("illegal MSG IN ~p", [Message]),
+	{stop, normal, Context#?CONTEXT{timestamp=os:timestamp()}};
+handle_message(Message=#mqtt_pingreq{}, Context) ->
 	% Reflect ping and refresh timeout.
-	fubar_log:debug(?MODULE, [State#?MODULE.client_id, "=>", Message]),
+	lager:info("~p MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	mqtt_stat:transient(mqtt_pingreq),
 	Reply = #mqtt_pingresp{},
-	fubar_log:debug(?MODULE, [State#?MODULE.client_id, "<=", Reply]),
-	{reply, Reply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_message(Message=#mqtt_publish{}, State=#?MODULE{session=Session}) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "=>", Message]),
+	lager:info("~p MSG OUT ~p", [Context#?CONTEXT.client_id, Reply]),
+	mqtt_stat:transient(mqtt_pingresp),
+	{reply, Reply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_message(Message=#mqtt_publish{}, Context=#?CONTEXT{session=Session}) ->
+	lager:info("~p MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	case Message#mqtt_publish.dup of
+		false ->
+			case Message#mqtt_publish.qos of
+				at_most_once -> mqtt_stat:transient(mqtt_publish_0_in);
+				at_least_once -> mqtt_stat:transient(mqtt_publish_1_in);
+				exactly_once -> mqtt_stat:transient(mqtt_publish_2_in);
+				_ -> mqtt_stat:transient(mqtt_publish_3_in)
+			end;
+		_ ->
+			ok
+	end,
 	Session ! Message,
-	{noreply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_message(Message=#mqtt_puback{}, State=#?MODULE{session=Session}) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "=>", Message]),
+	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_message(Message=#mqtt_puback{}, Context=#?CONTEXT{session=Session}) ->
+	lager:info("~p MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	mqtt_stat:transient(mqtt_puback_in),
 	Session ! Message,
-	{noreply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_message(Message=#mqtt_pubrec{}, State=#?MODULE{session=Session}) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "=>", Message]),
+	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_message(Message=#mqtt_pubrec{}, Context=#?CONTEXT{session=Session}) ->
+	lager:info("~p MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	mqtt_stat:transient(mqtt_pubrec_in),
 	Session ! Message,
-	{noreply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_message(Message=#mqtt_pubrel{}, State=#?MODULE{session=Session}) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "=>", Message]),
+	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_message(Message=#mqtt_pubrel{}, Context=#?CONTEXT{session=Session}) ->
+	lager:info("~p MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	mqtt_stat:transient(mqtt_pubrel_in),
 	Session ! Message,
-	{noreply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_message(Message=#mqtt_pubcomp{}, State=#?MODULE{session=Session}) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "=>", Message]),
+	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_message(Message=#mqtt_pubcomp{}, Context=#?CONTEXT{session=Session}) ->
+	lager:info("~p MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	mqtt_stat:transient(mqtt_pubcomp_in),
 	Session ! Message,
-	{noreply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_message(Message=#mqtt_subscribe{}, State=#?MODULE{session=Session}) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "=>", Message]),
+	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_message(Message=#mqtt_subscribe{}, Context=#?CONTEXT{session=Session}) ->
+	lager:info("~p MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	case Message#mqtt_subscribe.dup of
+		false -> mqtt_stat:transient(mqtt_subscribe);
+		_ -> ok
+	end,
 	Session ! Message,
-	{noreply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_message(Message=#mqtt_unsubscribe{}, State=#?MODULE{session=Session}) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "=>", Message]),
+	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_message(Message=#mqtt_unsubscribe{}, Context=#?CONTEXT{session=Session}) ->
+	lager:info("~p MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	case Message#mqtt_unsubscribe.dup of
+		false -> mqtt_stat:transient(mqtt_unsubscribe);
+		_ -> ok
+	end,
 	Session ! Message,
-	{noreply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_message(Message=#mqtt_disconnect{}, State=#?MODULE{session=Session}) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "=>", Message]),
+	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_message(Message=#mqtt_disconnect{}, Context=#?CONTEXT{session=Session}) ->
+	lager:info("~p MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	mqtt_stat:transient(mqtt_disconnect),
 	mqtt_session:stop(Session),
-	{stop, normal, State#?MODULE{timestamp=now()}};
+	{stop, normal, Context#?CONTEXT{timestamp=os:timestamp()}};
+handle_message(Message, Context) ->
+	lager:warning("~p unknown MSG IN ~p", [Context#?CONTEXT.client_id, Message]),
+	mqtt_stat:transient(mqtt_unknown_in),
+	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout}.
 
-%% Fallback
-handle_message(Message, State) ->
-	fubar_log:warning(?MODULE, [State#?MODULE.client_id, "=>", Message, "unknown message"]),
-	{noreply, State#?MODULE{timestamp=now()}, State#?MODULE.timeout}.
-
-%% @doc Handle internal events from, supposedly, the session.
--spec handle_event(event(), state()) ->
-		  {reply, mqtt_message(), state(), timeout()} |
-		  {reply_later, mqtt_message(), state(), timeout()} |
-		  {noreply, state(), timeout()} |
-		  {stop, reason(), state()}.
-handle_event(timeout, State=#?MODULE{client_id=ClientId}) ->
+-spec handle_event(Event :: term(), context()) ->
+		  {reply, mqtt_message(), context(), timeout()} |
+		  {noreply, context(), timeout()} |
+		  {stop, Reason :: term(), context()}.
+handle_event(timeout, Context=#?CONTEXT{client_id=ClientId}) ->
 	% General timeout
-	fubar_log:warning(?MODULE, [ClientId, "timed out"]),
-	{stop, normal, State};
-handle_event(Event, State=#?MODULE{session=undefined}) ->
-	fubar_log:error(?MODULE, [State#?MODULE.client_id, "sessionless event", Event]),
-	{noreply, State, timeout(State#?MODULE.timeout, State#?MODULE.timestamp)};
-handle_event(Event=#mqtt_publish{}, State) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "<=", Event]),
-	{reply, Event, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_event(Event=#mqtt_puback{}, State) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "<=", Event]),
-	{reply, Event, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_event(Event=#mqtt_pubrec{}, State) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "<=", Event]),
-	{reply, Event, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_event(Event=#mqtt_pubrel{}, State) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "<=", Event]),
-	{reply, Event, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_event(Event=#mqtt_pubcomp{}, State) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "<=", Event]),
-	{reply, Event, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_event(Event=#mqtt_suback{}, State) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "<=", Event]),
-	{reply, Event, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
-handle_event(Event=#mqtt_unsuback{}, State) ->
-	fubar_log:protocol(?MODULE, [State#?MODULE.client_id, "<=", Event]),
-	{reply, Event, State#?MODULE{timestamp=now()}, State#?MODULE.timeout};
+	case ClientId of
+		undefined -> ok;
+		_ -> lager:info("~p timed out", [ClientId])
+	end,
+	{stop, normal, Context};
+handle_event({stop, From}, Context=#?CONTEXT{client_id=ClientId}) ->
+	lager:debug("~p stop signal from ~p", [ClientId, From]),
+	{stop, normal, Context};
+handle_event(Event, Context=#?CONTEXT{session=undefined}) ->
+	lager:error("~p who sent this - ~p?", [Context#?CONTEXT.client_id,  Event]),
+	{stop, normal, Context};
+handle_event(Event=#mqtt_publish{}, Context) ->
+	lager:info("~p MSG OUT ~p", [Context#?CONTEXT.client_id, Event]),
+	case Event#mqtt_publish.dup of
+		false ->
+			case Event#mqtt_publish.qos of
+				at_most_once -> mqtt_stat:transient(mqtt_publish_0_out);
+				at_least_once -> mqtt_stat:transient(mqtt_publish_1_out);
+				exactly_once -> mqtt_stat:transient(mqtt_publish_2_out);
+				_ -> mqtt_stat:transient(mqtt_publish_3_out)
+			end;
+		_ ->
+			ok
+	end,
+	{reply, Event, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_event(Event=#mqtt_puback{}, Context) ->
+	lager:info("~p MSG OUT ~p", [Context#?CONTEXT.client_id, Event]),
+	mqtt_stat:transient(mqtt_puback_out),
+	{reply, Event, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_event(Event=#mqtt_pubrec{}, Context) ->
+	lager:info("~p MSG OUT ~p", [Context#?CONTEXT.client_id, Event]),
+	mqtt_stat:transient(mqtt_pubrec_out),
+	{reply, Event, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_event(Event=#mqtt_pubrel{}, Context) ->
+	lager:info("~p MSG OUT ~p", [Context#?CONTEXT.client_id, Event]),
+	mqtt_stat:transient(mqtt_pubrel_out),
+	{reply, Event, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_event(Event=#mqtt_pubcomp{}, Context) ->
+	lager:info("~p MSG OUT ~p", [Context#?CONTEXT.client_id, Event]),
+	mqtt_stat:transient(mqtt_pubcomp_out),
+	{reply, Event, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_event(Event=#mqtt_suback{}, Context) ->
+	lager:info("~p MSG OUT ~p", [Context#?CONTEXT.client_id, Event]),
+	mqtt_stat:transient(mqtt_suback),
+	{reply, Event, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_event(Event=#mqtt_unsuback{}, Context) ->
+	lager:info("~p MSG OUT ~p", [Context#?CONTEXT.client_id, Event]),
+	mqtt_stat:transient(mqtt_unsuback),
+	{reply, Event, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout};
+handle_event(Event, Context) ->
+	lager:warning("~p unknown MSG OUT ~p", [Context#?CONTEXT.client_id, Event]),
+	{noreply, Context, timeout(Context#?CONTEXT.timeout, Context#?CONTEXT.timestamp)}.
 
-%% Fallback
-handle_event(Event, State) ->
-	fubar_log:debug(?MODULE, [State#?MODULE.client_id, Event, "unknown event"]),
-	{noreply, State, timeout(State#?MODULE.timeout, State#?MODULE.timestamp)}.
-
-%% @doc Finalize the server process.
--spec terminate(state()) -> ok.
-terminate(#?MODULE{client_id=ClientId}) ->
-	fubar_log:debug(?MODULE, [ClientId, terminate]),
-	normal;
-terminate(_) ->
+-spec terminate(Reason :: term(), context()) -> Reason :: term().
+terminate(Reason, Context) ->
+	lager:debug("~p terminating", [Context#?CONTEXT.client_id]),
+	case Reason of
+		#mqtt_publish{} -> Context#?CONTEXT.session ! {recover, Reason};
+		#mqtt_puback{} -> Context#?CONTEXT.session ! {recover, Reason};
+		_ -> ok
+	end,
 	normal.
 
 %%
 %% Local Functions
 %%
+accept(Message=#mqtt_connect{}, Context=#?CONTEXT{auth=undefined}) ->
+	bind_session(Message, Context);
+accept(Message=#mqtt_connect{client_id=ClientId},
+		Context=#?CONTEXT{auth=Auth, timeout=Timeout, timestamp=Timestamp}) ->
+	case Message#mqtt_connect.username of
+		undefined ->
+			% Give another chance to connect with right credential again.
+			lager:warning("~p no username", [ClientId]),
+			Reply = mqtt:connack([{code, unauthorized}]),
+			lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+			mqtt_stat:transient(mqtt_connack),
+			{reply, Reply, Context, timeout(Timeout, Timestamp)};
+		Username ->
+			% Connection with credential.
+			case Auth:verify(Username, Message#mqtt_connect.password) of
+				ok ->
+					% The client is authorized.
+					% Now bind with the session or create a new one.
+					lager:debug("~p authorized ~p", [ClientId, Username]),
+					bind_session(Message, Context);
+				{error, not_found} ->
+					lager:warning("~p wrong username ~p", [ClientId, Username]),
+					Reply = mqtt:connack([{code, forbidden}]),
+					lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+					mqtt_stat:transient(mqtt_connack),
+					{reply, Reply, Context#?CONTEXT{timestamp=os:timestamp()}, 0};
+				{error, forbidden} ->
+					lager:warning("~p wrong password ~p", [ClientId, Username]),
+					Reply = mqtt:connack([{code, forbidden}]),
+					lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+					mqtt_stat:transient(mqtt_connack),
+					{reply, Reply, Context#?CONTEXT{timestamp=os:timestamp()}, 0};
+				Error ->
+					lager:error("~p error ~p in ~p:verify/2", [ClientId, Error, Auth]),
+					Reply = mqtt:connack([{code, unavailable}]),
+					lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+					mqtt_stat:transient(mqtt_connack),
+					{reply, Reply, Context#?CONTEXT{timestamp=os:timestamp()}, 0}
+			end
+	end.
+
+drop(#mqtt_connect{client_id=ClientId}, Context) ->
+	lager:info("~p overloaded", [ClientId]),
+	Reply = mqtt:connack([{code, unavailable}]),
+	lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+	mqtt_stat:transient(mqtt_connack),
+	{reply, Reply, Context#?CONTEXT{timestamp=os:timestamp()}, 0}.
+
+offload(#mqtt_connect{client_id=ClientId, max_recursion=MaxRecursion}, Addr, Context) ->
+	lager:info("~p offloading to ~s", [ClientId, Addr]),
+	Reply = mqtt:connack([{code, alt_server}, {alt_server, list_to_binary(Addr)}, {max_recursion, MaxRecursion-1}]),
+	lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+	mqtt_stat:transient(mqtt_connack),
+	{reply, Reply, Context#?CONTEXT{timestamp=os:timestamp()}, 0}.
+
 timeout(infinity, _) ->
 	infinity;
 timeout(Milliseconds, Timestamp) ->
-	Elapsed = timer:now_diff(now(), Timestamp) div 1000,
+	Elapsed = timer:now_diff(os:timestamp(), Timestamp) div 1000,
 	case Milliseconds > Elapsed of
 		true -> Milliseconds - Elapsed;
 		_ -> 0
 	end.
 
-bind_session(Message=#mqtt_connect{client_id=ClientId}, State) ->
+bind_session(Message=#mqtt_connect{client_id=ClientId, username=Username}, Context) ->
 	% Once bound, the session will detect process termination.
 	% Timeout value should be set as requested.
 	Will = case Message#mqtt_connect.will_topic of
@@ -221,12 +350,12 @@ bind_session(Message=#mqtt_connect{client_id=ClientId}, State) ->
 			   Topic -> {Topic, Message#mqtt_connect.will_message,
 						 Message#mqtt_connect.will_qos, Message#mqtt_connect.will_retain}
 		   end,
-	case mqtt_session:bind(ClientId, Will) of
+	case catch mqtt_session:bind(ClientId, Username, Will) of
 		{ok, Session} ->
-			fubar_log:access(?MODULE, [ClientId, "session bound", Session]),
-			KeepAlive = determine_keep_alive(Message#mqtt_connect.keep_alive, State#?MODULE.valid_keep_alive),
+			lager:debug("~p session bound ~p", [ClientId, Session]),
+			KeepAlive = determine_keep_alive(Message#mqtt_connect.keep_alive, Context#?CONTEXT.valid_keep_alive),
 			% Set timeout as 1.5 times the keep-alive.
-			Timeout = KeepAlive*1500,
+			Timeout = KeepAlive*?KEEPALIVE_MULTIPLIER,
 			Reply = case KeepAlive =:= Message#mqtt_connect.keep_alive of
 						true -> mqtt:connack([{code, accepted}]);
 						% MQTT extension: server may suggest different keep-alive.
@@ -236,15 +365,24 @@ bind_session(Message=#mqtt_connect{client_id=ClientId}, State) ->
 				true -> mqtt_session:clean(Session);
 				_ -> ok
 			end,
-			fubar_log:protocol(?MODULE, [ClientId, "<=", Reply]),
+			lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+			mqtt_stat:transient(mqtt_connack),
 			{reply, Reply,
-			 State#?MODULE{client_id=ClientId, session=Session, timeout=Timeout, timestamp=now()}, Timeout};
-		Error ->
-			fubar_log:error(?MODULE, [ClientId, "session bind failure", Error]),
+			 Context#?CONTEXT{client_id=ClientId, session=Session, timeout=Timeout, timestamp=os:timestamp()}, Timeout};
+		{'EXIT', Reason} ->
+			lager:error("~p exception ~p binding session", [ClientId, Reason]),
 			Reply = mqtt:connack([{code, unavailable}]),
-			fubar_log:protocol(?MODULE, [ClientId, "<=", Reply]),
+			lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+			mqtt_stat:transient(mqtt_connack),
 			% Timeout immediately to close just after reply.
-			{reply, Reply, State#?MODULE{client_id=ClientId, timestamp=now()}, State#?MODULE.timeout}
+			{reply, Reply, Context#?CONTEXT{client_id=ClientId, timestamp=os:timestamp()}, 0};
+		Error ->
+			lager:error("~p error ~p binding session", [ClientId, Error]),
+			Reply = mqtt:connack([{code, unavailable}]),
+			lager:info("~p MSG OUT ~p", [ClientId, Reply]),
+			mqtt_stat:transient(mqtt_connack),
+			% Timeout immediately to close just after reply.
+			{reply, Reply, Context#?CONTEXT{client_id=ClientId, timestamp=os:timestamp()}, 0}
 	end.
 
 determine_keep_alive(Suggested, {Min, _}) when Suggested < Min ->
@@ -258,4 +396,5 @@ determine_keep_alive(Suggested, _) ->
 %% Unit Tests
 %%
 -ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
 -endif.

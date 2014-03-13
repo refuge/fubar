@@ -3,112 +3,131 @@
 ###############################################################################
 ## Make parameters
 ###############################################################################
-mqtt_port=1883
-mqtts_port=undefined
 node=fubar
 master=undefined
-cookie=sharedsecretamongnodes
-# ssh_host=localhost
-# ssh_port=22
+mqtt_port=1883
+mqtts_port=undefined
+http_port=undefined
+cookie=sharedsecretamongnodesofafubarcluster_youneedtochangethisforsecurity
 
 ## Static values
 APP=fubar
-export RUN_ERL_LOG_GENERATIONS:=10
-export RUN_ERL_LOG_MAXSIZE:=1024000
 
 # Compile source codes only.
 compile:
 	./rebar compile
 
-# Start the program in test mode.
-test: compile
-	mkdir -p priv/data
-	mkdir -p priv/log/$(node)
-	erl -pa ebin deps/*/ebin +A 100 +K true +P 10000000 +W w -boot start_sasl \
-		-sname $(node) -setcookie $(cookie) -s reloader -s $(APP) \
-		-mnesia dir '"priv/data/$(node)"' \
-		-env MQTT_PORT $(mqtt_port) -env MQTTS_PORT $(mqtts_port) -env FUBAR_MASTER $(master)
+LOGDIR=log
+DATADIR=priv/data
 
-# Start the program in production mode.
+# Start a daemon
+# Params: node (default fubar), master (in node@host format),
+#         mqtt_port (default 1883), mqtts_port, http_port, cookie
 run: compile
-	mkdir -p priv/data
-	mkdir -p priv/log/$(node)
-	mkdir -p /tmp/$(node)
-	run_erl -daemon /tmp/$(node)/ $(CURDIR)/priv/log/$(node) \
-		"erl -pa $(CURDIR)/ebin $(CURDIR)/deps/*/ebin +A 100 +K true +P 10000000 +W w -boot start_sasl \
-			-sname $(node) -setcookie $(cookie) -s $(APP) \
-			-mnesia dir '\"$(CURDIR)/priv/data/$(node)\"' \
-			-env MQTT_PORT $(mqtt_port) -env MQTTS_PORT $(mqtts_port) -env FUBAR_MASTER $(master)"
+	mkdir -p $(DATADIR)
+	mkdir -p $(LOGDIR)
+	erl -pa ebin deps/*/ebin +A 100 +K true +P 10000000 +W w +swt low +Mummc 99999 \
+		-sname $(node) -setcookie $(cookie) -detached -config $(APP) \
+		-mnesia dir '"$(DATADIR)/$(node)"' \
+		-s $(APP) \
+		-env MQTT_PORT $(mqtt_port) -env MQTTS_PORT $(mqtts_port) -env HTTP_PORT $(http_port) \
+		-env FUBAR_MASTER $(master)
 
+# Stop a daemon
+# Params: node (default fubar), cookie
 stop:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` stop
 
+# Show a daemon state
+# Params: node (default fubar), cookie
 state:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` state
 
+# Show all ACL
+# Params: node (default fubar), cookie
 acl-all:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` acl all
 
 ip=127.0.0.1
 allow=true
 
+# Show an ACL
+# Params: node (default fubar), ip (default 127.0.0.1), cookie
 acl-get:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` acl get $(ip)
 
+# Update an ACL
+# Params: node (default fubar), ip (default 127.0.0.1), allow (default true), cookie
 acl-set:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` acl set $(ip) $(allow)
 
+# Delete an ACL
+# Params: node (default fubar), ip (default 127.0.0.1), cookie
 acl-del:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` acl del $(ip)
 
+# Show all accounts
+# Params: node (default fubar), cookie
 account-all:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` account all
 
 username=undefined
 password=undefined
 
+# Show an account
+# Params: node (default fubar), username, cookie
 account-get:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` account get $(username)
 
+# Update an account
+# Params: node (default fubar), username, password, cookie
 account-set:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` account set $(username) $(password)
 
+# Delete an account
+# Params: node (default fubar), username, cookie
 account-del:
-	erl -pa ebin deps/*/ebin -noinput -hide -setcookie $(cookie) -sname $(node)_control \
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
 		-s fubar_control call $(node)@`hostname -s` account del $(username)
 
-# Debug running program in production mode.
+client_id=undefined
+on=true
+
+# Trace on/off
+trace:
+	erl -pa ebin deps/*/ebin -noinput -hidden -setcookie $(cookie) -sname $(node)_control \
+		-s fubar_control call $(node)@`hostname -s` trace $(client_id) $(on) 
+
+# Connect to the shell of a daemon
+# Params: node (default fubar), cookie
 debug:
-#	ssh $(ssh_host) -p $(ssh_port) -tt /usr/local/bin/to_erl /tmp/$(node)/
-	to_erl /tmp/$(node)/
-
-# Launch a shell for client.
-client: compile
-	erl -pa ebin deps/*/ebin +A 16 +K true +P 1000000 +W w -s reloader
-
-# Make a textual SASL log snapshot.
-dump:
-	priv/script/dump-log.escript $(node)
+	erl -pa $(CURDIR)/ebin $(CURDIR)/deps/*/ebin -remsh $(node)@`hostname -s` \
+	-sname $(node)_debug -setcookie $(cookie)
 
 # Perform unit tests.
 check: compile
-	./rebar eunit
+	./rebar eunit skip_deps=true
 
-# Clear all the binaries and dependencies.  The runtime remains intact.
+# Perform common tests.
+test: compile
+	./rebar ct suites=$(APP) skip_deps=true
+
+# Clear all the binaries and dependencies.  The data remains intact.
 clean: delete-deps
 	rm -rf *.dump
+	rm -rf test/*.beam
 	./rebar clean
 
-# Clear the runtime.
+# Clear all data.
 reset:
 	rm -rf priv/data/$(node)
 
@@ -116,11 +135,14 @@ reset:
 doc:
 	./rebar doc
 
+# Update dependencies.
 deps: get-deps
 	./rebar update-deps
 
+# Download dependencies.
 get-deps:
 	./rebar get-deps
 
+# Delete dependencies.
 delete-deps:
 	./rebar delete-deps

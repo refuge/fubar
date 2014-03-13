@@ -15,122 +15,217 @@
 -author("Sungjin Park <jinni.park@gmail.com>").
 
 %%
-%% Includes
-%%
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
-
--include("fubar.hrl").
--include("sasl_log.hrl").
-
-%% @doc Routing table schema
--record(?MODULE, {name = '_' :: term(),
-				  addr = '_' :: undefined | pid(),
-				  module = '_' :: module()}).
-
-%%
 %% Exports
 %%
--export([boot/0, cluster/1, resolve/1, ensure/2, up/2, down/1, clean/1]).
+-export([mnesia/1, resolve/1, ensure/2, up/2, sync_up/2, down/1, update/2, clean/1]).
 
-%% @doc Master mode bootstrap logic.
-boot() ->
-	case mnesia:create_table(?MODULE, [{attributes, record_info(fields, ?MODULE)},
-									   {disc_copies, [node()]}, {type, set}]) of
-		{atomic, ok} ->
-			?INFO({"table created", ?MODULE}),
-			ok;
-		{aborted, {already_exists, ?MODULE}} ->
-			ok
-	end,
-	ok = mnesia:wait_for_tables([?MODULE], 10000),
-	?INFO({"table loaded", ?MODULE}).
+-include_lib("stdlib/include/qlc.hrl").
 
-%% @doc Slave mode bootstrap logic.
-cluster(_MasterNode) ->
+%% @doc Routing table schema
+-record(?MODULE, {
+		name = '_' :: term(),
+		addr = '_' :: undefined | pid(),
+		module = '_' :: module(),
+		trace = '_' :: boolean()
+}).
+
+%% Auto start-up attributes
+-create_mnesia_tables({mnesia, [create_tables]}).
+-merge_mnesia_tables({mnesia, [merge_tables]}).
+-split_mnesia_tables({mnesia, [split_tables]}).
+
+-define(MNESIA_TIMEOUT, 10000).
+
+%% @doc Mnesia table manipulations.
+mnesia(create_tables) ->
+	mnesia:create_table(?MODULE, [{attributes, record_info(fields, ?MODULE)},
+								  {disc_copies, [node()]}, {type, set}]),
+	ok = mnesia:wait_for_tables([?MODULE], ?MNESIA_TIMEOUT),
+	mnesia(verify_tables);
+mnesia(merge_tables) ->
 	{atomic, ok} = mnesia:add_table_copy(?MODULE, node(), disc_copies),
-	?INFO({"table replicated", ?MODULE}).
+	mnesia(verify_tables);
+mnesia(split_tables) ->
+	mnesia:del_table_copy(?MODULE, node());
+mnesia(verify_tables) ->
+	Node = node(),
+	Q = qlc:q([Route || Route <- mnesia:table(?MODULE),
+						Node =:= (catch node(Route#?MODULE.addr))]),
+	T = fun() ->
+			Routes = qlc:e(Q),
+			lists:foreach(
+				fun(Route) ->
+					mnesia:write(Route#?MODULE{addr=undefined})
+				end,
+				Routes)
+		end,
+	mnesia:async_dirty(T).
 
 %% @doc Resovle given name into address.
--spec resolve(term()) -> {ok, {pid(), module()}} | {error, reason()}.
 resolve(Name) ->
-	case catch mnesia:async_dirty(fun mnesia:dirty_read/2, [?MODULE, Name]) of
-		[#?MODULE{name=Name, addr=undefined, module=Module}] ->
-			{ok, {undefined, Module}};
-		[Route=#?MODULE{name=Name, addr=Addr, module=Module}] ->
-			case check_process(Addr) of
-				true ->
-					{ok, {Addr, Module}};
-				_ ->
-					{catch mnesia:dirty_write(Route#?MODULE{addr=undefined}), {undefined, Module}}
-			end;
-		[] ->
-			{error, not_found};
-		Error ->
-			{error, Error}
+	F = fun() ->
+			case mnesia:wread({?MODULE, Name}) of
+				[#?MODULE{name=Name, addr=undefined, module=Module, trace=Trace}] ->
+					{ok, {undefined, Module, Trace}};
+				[#?MODULE{name=Name, addr=Addr, module=Module, trace=Trace}] ->
+					case check_process(Addr) of
+						true ->
+							{ok, {Addr, Module, Trace}};
+						_ ->
+							{ok, {undefined, Module, Trace}}
+					end;
+				[] ->
+					{error, not_found};
+				Error ->
+					{error, Error}
+			end
+		end,
+	case catch mnesia:async_dirty(F) of
+		{'EXIT', Reason} -> {error, Reason};
+		Result -> Result
 	end.
 
 %% @doc Ensure given name exists.
--spec ensure(term(), module()) -> {ok, pid()} | {error, reason()}.
 ensure(Name, Module) ->
-	case catch mnesia:async_dirty(fun mnesia:dirty_read/2, [?MODULE, Name]) of
-		[#?MODULE{name=Name, addr=Addr, module=Module}] ->
-			case check_process(Addr) of
-				true -> {ok, Addr};
-				_ -> Module:start([{name, Name}])
-			end;
-		[#?MODULE{name=Name}] ->
-			{error, collision};
-		[] ->
-			Module:start([{name, Name}]);
-		Error ->
-			{error, Error}
+	F = fun() ->
+			case mnesia:read(?MODULE, Name) of
+				[#?MODULE{name=Name, addr=Addr, module=Module, trace=Trace}] ->
+					case check_process(Addr) of
+						true ->
+							{ok, {Addr, Module, Trace}};
+						_ ->
+							case Module:start([{name, Name}, {trace, Trace}]) of
+								{ok, Pid} -> {ok, {Pid, Module, Trace}};
+								Error -> Error
+							end
+					end;
+				[#?MODULE{name=Name}] ->
+					{error, collision};
+				[] ->
+					case Module:start([{name, Name}]) of
+						{ok, Pid} -> {ok, {Pid, Module, false}};
+						Error -> Error
+					end;
+				Error ->
+					{error, Error}
+			end
+		end,
+	case catch mnesia:async_dirty(F) of
+		{'EXIT', Reason} -> {error, Reason};
+		Result -> Result
 	end.
 
 %% @doc Update route with fresh name and address.
--spec up(term(), module()) -> ok | {error, reason()}.
 up(Name, Module) ->
 	Pid = self(),
-	Route = #?MODULE{name=Name, addr=Pid, module=Module},
-	case catch mnesia:async_dirty(fun mnesia:dirty_read/2, [?MODULE, Name]) of
-		[#?MODULE{name=Name, addr=Pid, module=Module}] ->
-			% Ignore duplicate up call.
-			fubar_log:warning(?MODULE, ["duplicate up", Name, Pid, Module]),
-			ok;
-		[#?MODULE{name=Name, addr=undefined, module=Module}] ->
-			catch mnesia:dirty_write(Route);
-		[#?MODULE{name=Name, addr=Addr, module=Module}] ->
-			% Oust old one.
-			fubar_log:warning(?MODULE, ["conflict up", Name, Pid, Addr, Module]),
-			exit(Addr, kill),
-			catch mnesia:dirty_write(Route);
-		[#?MODULE{name=Name}] ->
-			% Occupied by different module.
-			{error, collision};
-		[] ->
-			catch mnesia:dirty_write(Route);
-		Error ->
-			{error, Error}
+	Route = #?MODULE{name=Name, addr=Pid, module=Module, trace=false},
+	F = fun() ->
+			case mnesia:wread({?MODULE, Name}) of
+				[#?MODULE{name=Name, addr=Pid, module=Module}] ->
+					% Ignore duplicate up call.
+					ok;
+				[#?MODULE{name=Name, addr=undefined, module=Module}] ->
+					mnesia:write(Route);
+				[#?MODULE{name=Name, addr=Addr, module=Module}] ->
+					% Oust old one.
+					Addr ! {stop, self()},
+					mnesia:write(Route);
+				[#?MODULE{name=Name}] ->
+					% Occupied by different module.
+					{error, collision};
+				[] ->
+					mnesia:write(Route);
+				Error ->
+					{error, Error}
+			end
+		end,
+	case catch mnesia:async_dirty(F) of
+		{'EXIT', Reason} -> {error, Reason};
+		Result -> Result
+	end.
+
+%% @doc Synchronously update route with fresh name and address.
+sync_up(Name, Module) ->
+	Pid = self(),
+	Route = #?MODULE{name=Name, addr=Pid, module=Module, trace=false},
+	F = fun() ->
+			case mnesia:wread({?MODULE, Name}) of
+				[#?MODULE{name=Name, addr=undefined, module=Module}] ->
+					mnesia:write(Route);
+				[#?MODULE{name=Name, addr=_, module=Module}] ->
+					% Can't ignore duplicate up
+					{error, already_exists};
+				[#?MODULE{name=Name}] ->
+					% Occupied by different module.
+					{error, collision};
+				[] ->
+					mnesia:write(Route);
+				Error ->
+					{error, Error}
+			end
+		end,
+	case catch mnesia:transaction(F) of
+		{atomic, Result} -> Result;
+		{'EXIT', Reason} -> {error, Reason};
+		Error -> Error
 	end.
 
 %% @doc Update route with stale name and address.
--spec down(term()) -> ok | {error, reason()}.
 down(Name) ->
-	case catch mnesia:async_dirty(fun mnesia:dirty_read/2, [?MODULE, Name]) of
-		[Route] ->
-			catch mnesia:dirty_write(Route#?MODULE{addr=undefined});
-		[] ->
-			fubar_log:error(?MODULE, ["unknown down", Name]),
-			{error, not_found};
-		Error ->
-			{error, Error}
+	Self = self(),
+	F = fun() ->
+			case mnesia:wread({?MODULE, Name}) of
+				[Route=#?MODULE{addr=Self}] ->
+					mnesia:write(Route#?MODULE{addr=undefined});
+				[_] ->
+					{error, not_allowed};
+				[] ->
+					{error, not_found};
+				Error ->
+					{error, Error}
+			end
+		end,
+	case catch mnesia:async_dirty(F) of
+		{'EXIT', Reason} -> {error, Reason};
+		Result -> Result
+	end.
+
+%% @doc Update route info.
+update(Name, {trace, Trace}) ->
+	F = fun() ->
+			case mnesia:wread({?MODULE, Name}) of
+				[Route=#?MODULE{name=Name}] ->
+					mnesia:write(Route#?MODULE{trace=Trace});
+				[] ->
+					{error, not_found};
+				Error ->
+					{error, Error}
+			end
+		end,
+	case catch mnesia:async_dirty(F) of
+		{'EXIT', Reason} -> {error, Reason};
+		Result -> Result
 	end.
 
 %% @doc Delete route.
--spec clean(term()) -> ok | {error, reason()}.
 clean(Name) ->
-	catch mnesia:dirty_delete(?MODULE, Name).
+	Self = self(),
+	F = fun() ->
+			case mnesia:wread({?MODULE, Name}) of
+				[#?MODULE{addr=Self}] ->
+					mnesia:delete({?MODULE, Name});
+				[_] ->
+					{error, not_allowed};
+				[] ->
+					{error, not_found};
+				Error ->
+					{error, Error}
+			end
+		end,
+	case catch mnesia:async_dirty(F) of
+		{'EXIT', Reason} -> {error, Reason};
+		Result -> Result
+	end.
 
 %%
 %% Local
@@ -150,4 +245,9 @@ check_process(Pid) ->
 %% Unit Tests
 %%
 -ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+check_process_test() ->
+	?assert(check_process(self()) == true).
+
 -endif.

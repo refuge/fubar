@@ -9,48 +9,32 @@
 -author("Sungjin Park <jinni.park@gmail.com>").
 
 %%
-%% Includes
+%% Exports
 %%
--ifdef(TEST).
--include_lib("eunit/include/eunit.hrl").
--endif.
-
--include("fubar.hrl").
--include("sasl_log.hrl").
-
-%%
-%% Records
-%%
+-export([mnesia/1, verify/1, update/2, delete/1]).
 
 %% @doc MQTT acl database schema.
 -record(?MODULE, {addr = '_' :: binary(),
 				  allow = '_' :: binary()}).
 
-%%
-%% Exports
-%%
--export([boot/0, cluster/1, verify/1, update/2, delete/1]).
+%% Auto start-up attributes
+-create_mnesia_tables({mnesia, [create_tables]}).
+-merge_mnesia_tables({mnesia, [merge_tables]}).
+-split_mnesia_tables({mnesia, [split_tables]}).
 
-%% @doc Master mode bootstrap logic.
-boot() ->
-	case mnesia:create_table(?MODULE, [{attributes, record_info(fields, ?MODULE)},
-									   {disc_copies, [node()]}, {type, set}]) of
-		{atomic, ok} ->
-			?INFO({"table created", ?MODULE}),
-			ok;
-		{aborted, {already_exists, ?MODULE}} ->
-			ok
-	end,
-	ok = mnesia:wait_for_tables([?MODULE], 10000),
-	?INFO({"table loaded", ?MODULE}).
+-define(MNESIA_TIMEOUT, 10000).
 
-%% @doc Slave mode bootstrap logic.
-cluster(_MasterNode) ->
-	{atomic, ok} = mnesia:add_table_copy(?MODULE, node(), disc_copies),
-	?INFO({"table replicated", ?MODULE}).
+%% @doc Mnesia table manipulations.
+mnesia(create_tables) ->
+	mnesia:create_table(?MODULE, [{attributes, record_info(fields, ?MODULE)},
+								  {disc_copies, [node()]}, {type, set}]),
+	ok = mnesia:wait_for_tables([?MODULE], ?MNESIA_TIMEOUT);
+mnesia(merge_tables) ->
+	{atomic, ok} = mnesia:add_table_copy(?MODULE, node(), disc_copies);
+mnesia(split_tables) ->
+	mnesia:del_table_copy(?MODULE, node()).
 
 %% @doc Verify credential.
--spec verify(term()) -> ok | {error, reason()}.
 verify(Addr) ->
 	case catch mnesia:dirty_read(?MODULE, Addr) of
 		[] ->
@@ -64,21 +48,20 @@ verify(Addr) ->
 	end.
 
 %% @doc Update account.
--spec update(binary(), binary()) -> ok | {aborted, reason()}.
 update(Addr, Allow) ->
 	Result = mnesia:dirty_write(#?MODULE{addr=Addr, allow=Allow}),
-	fubar_log:info(?MODULE, [update, Addr, Allow, Result]),
+	lager:notice("acl {~p,~p} update ~p", [Addr, Allow, Result]),
 	Result.
 
 %% @doc Delete account.
--spec delete(binary()) -> ok | {aborted, reason()}.
 delete(Addr) ->
 	Result = mnesia:dirty_delete(?MODULE, Addr),
-	fubar_log:info(?MODULE, [delete, Addr, Result]),
+	lager:notice("acl ~p delete ~p", [Addr, Result]),
 	Result.
 
 %%
 %% Unit Tests
 %%
 -ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
 -endif.
