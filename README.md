@@ -44,11 +44,22 @@ There are also some command line parameters.
 * `master=fubar@remote` *remote node to cluster with*
 * `cookie=xxxxxx` *security cookie string*
 	
+You can check the broker state.
+
+	$ make state
+
+	== fubar@host running ==
+	        name : fubar
+	 description : "Scalable MQTT message broker"
+	     version : "3.0.0"
+	   listeners : [{mqtt,[{connections,0},{acceptors,1024}]}]
+	       nodes : [fubar@host]
+	      routes : 0
+	      memory : [{'MB',213},
+	                {load,0.03377922962411755},
+	                {min_load,{fubar@host,0.03377922962411755}}]
+
 ### Playing with the broker ###
-
-#### Setting an account ####
-
-	$ make account-set username=test password=1234
 
 #### Getting into the broker shell ####
 
@@ -90,7 +101,7 @@ Press `CTRL+C` twice.
 Note) If you want to start more than one broker node in a computer,
 You have to use different node name and listen port as:
 
-	$ make test master=name@host node=other mqtt_port=1884
+	$ make run master=name@host node=other mqtt_port=1884
 	
 ### Using account control ###
 
@@ -105,8 +116,8 @@ Manage account using make commands like,
 	$
 
 `{auth, mqtt_account}` line can be commented out from **fubar.config** to
-disable account authentication.  In this case, anyone may connect the
-broker without username/password.
+disable account authentication (default).  In this case, anyone may connect
+the broker without username/password.
 
 ### Using ACL control ###
 
