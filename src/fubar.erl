@@ -185,7 +185,7 @@ ensure_started(App) ->
 			ets:insert(?APPLICATION, {App, os:timestamp()}),
 			poststart(App);
 		{error, {already_started, _}} ->
-			ok;
+			poststart(App);
 		{error, {not_started, Dep}} ->
 			ensure_started(Dep),
 			ensure_started(App)
