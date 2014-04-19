@@ -6,7 +6,7 @@
 %%% Created : Aug 11, 2013
 %%% -------------------------------------------------------------------
 -module(mqtt_client_monitor).
--author("Sungjin Park <jinni.park@sk.com>").
+-author("Sungjin Park <jinni.park@gmail.com>").
 -behavior(gen_server).
 
 -export([start/1, stop/0, max_cps/0, max_cps/1, start_link/1]).
