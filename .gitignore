@@ -1,0 +1,8 @@
+*~
+*.beam
+deps/
+ebin/
+log/
+logs/
+priv/data/
+.eunit/

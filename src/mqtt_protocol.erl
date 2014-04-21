@@ -729,7 +729,7 @@ format(#mqtt_connect{protocol=Protocol, version=Version, username=Username,
 					 max_recursion=MaxRecursion, extra=Extra}) ->
 	ProtocolField = format(Protocol),
 	{UsernameFlag, UsernameField} = case Username of
-										undefined ->
+										nil ->
 											{<<0:1>>, <<>>};
 										<<>> ->
 											{<<0:1>>, <<>>};
