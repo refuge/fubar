@@ -42,7 +42,8 @@ mqtt_server(Config) ->
 			A = rpc:call(Node, mqtt_server, get_address, []),
 			ok = rpc:call(Node, fubar, settings, [mqtt_server, {address, "test"}]),
 			"test" = rpc:call(Node, mqtt_server, get_address, []),
-			ok = rpc:call(Node, fubar, settings, [mqtt_server, {address, A}])
+			ok = rpc:call(Node, fubar, settings, [mqtt_server, {address, A}]),
+			ok = rpc:call(Node, fubar, settings, [mqtt_server, {auth, mqtt_account}])
 		end,
 		Servers),
 	Config.
