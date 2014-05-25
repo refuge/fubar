@@ -19,7 +19,7 @@ offline_message(Config) ->
 		C when C > 1 ->
 			C1 = <<"000000">>,
 			C2 = <<"000001">>,
-			mqtt_client_sup:stop_child(C2),
+			mqtt_client:stop(C2),
 			ct:log("client ~p terminating", [C2]),
 			% Wait a short while for termination.
 			ct:sleep(?WAIT),
@@ -27,11 +27,11 @@ offline_message(Config) ->
 			ct:log("client ~p sending ~p to ~p", [C1, C1, C2]),
 			% Wait a short while for offline messaging.
 			ct:sleep(?WAIT),
-			mqtt_client_sup:restart_child(C2),
+			mqtt_client_sup:reconnect(C2),
 			ct:log("client ~p restarting", [C2]),
 			% Wait a short while for message delivery.
 			ct:sleep(?WAIT),
-			C1 = mqtt_client:last_message(C2),
+			{ok, C1} = mqtt_client_simple:last_message(C2),
 			ct:log("client ~p received ~p", [C2, C1]),
 			fubar_mqtt_test:mqtt_disconnect(Config1, disconnected),
 			ct:comment("Confirmed offline messaging from ~p to ~p", [C1, C2]);
@@ -45,16 +45,16 @@ migration(Config) ->
 		[{N1, _P1}, {N2, P2} | _] ->
 			Config1 = fubar_mqtt_test:mqtt_connect(Config, connected),
 			C1 = <<"000000">>,
-			mqtt_client_sup:stop_child(C1),
+			mqtt_client:stop(C1),
 			ct:log("client ~p terminating", [C1]),
 			% Wait a short while for termination.
 			ct:sleep(?WAIT),
 			% Connect to a different server.
-			mqtt_client:start([{client_id, C1}, {port, P2}]),
+			mqtt_client_simple:connect([{client_id, C1}, {port, P2}]),
 			ct:log("client ~p connecting to ~p", [C1, P2]),
 			% Wait a short while for connection.
 			ct:sleep(?WAIT),
-			connected = mqtt_client:state(C1),
+			{ok, connected} = mqtt_client:state(C1),
 			{ok, {Pid, _, _}} = rpc:call(N2, fubar_route, resolve, [C1]),
 			% The session must be in N2.
 			N2 = node(Pid),

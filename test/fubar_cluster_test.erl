@@ -45,9 +45,9 @@ load_balancing(Config) ->
 	ct:log("Set default port=~p", [P1]),
 	% Connect must fail now.
 	C = <<"000000">>,
-	mqtt_client:start([{client_id, C}]),
+	mqtt_client_simple:connect([{client_id, C}]),
 	ct:sleep(?WAIT),
-	disconnected = mqtt_client:state(C),
+	{ok, disconnected} = mqtt_client:state(C),
 	ct:log("Connection rejected"),
 	% Unload server 2.
 	L2 = rpc:call(N2, fubar_sysmon, load, []),
@@ -56,16 +56,16 @@ load_balancing(Config) ->
 	ct:log("Server ~p high_watermark=~p", [N2, W2*L2/0.5]),
 	ct:sleep(?WAIT*3),
 	% Client must be offloaded to server 2 now.
-	mqtt_client:start([{client_id, C}]),
+	mqtt_client_simple:connect([{client_id, C}]),
 	ct:sleep(?WAIT*2),
 	P2 = proplists:get_value(port, fubar:settings(mqtt_client)),
 	ct:log("Offloaded to ~p", [P2]),
-	connected = mqtt_client:state(C),
+	{ok, connected} = mqtt_client:state(C),
 	ct:log("Connection accepted"),
 	{ok, {Pid2, _, _}} = rpc:call(N2, fubar_route, resolve, [C]),
 	N2 = node(Pid2),
 	ct:log("Session found in ~p", [N2]),
-	mqtt_client:stop(C),
+	mqtt_client:disconnect(C),
 	% Unload server 1.
 	L1 = rpc:call(N1, fubar_sysmon, load, []),
 	W1 = rpc:call(N1, fubar_sysmon, high_watermark, []),
@@ -75,14 +75,14 @@ load_balancing(Config) ->
 	% Client must connect to server 1 again.
 	fubar:settings(mqtt_client, {port, P1}),
 	ct:log("Changed target port to ~p", [P1]),
-	mqtt_client:start([{client_id, C}]),
+	mqtt_client_simple:connect([{client_id, C}]),
 	ct:sleep(?WAIT),
-	connected = mqtt_client:state(C),
+	{ok, connected} = mqtt_client:state(C),
 	ct:log("Connection accepted"),
 	{ok, {Pid1, _, _}} = rpc:call(N1, fubar_route, resolve, [C]),
 	N1 = node(Pid1),
 	ct:log("Session found in ~p", [N1]),
-	mqtt_client:stop(C),
+	mqtt_client:disconnect(C),
 	% Restore settings.
 	lists:foreach(
 		fun({{N, _P}, {I0, W0}}) ->

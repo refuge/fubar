@@ -166,10 +166,26 @@ handle_info({nodedown, N}, State=#?STATE{load=L}) ->
             {noreply, State}
     end;
 handle_info({N, L}, State=#?STATE{min_load={N0, L0}}) ->
-    State1 = case (N =:= N0) or (L < L0) of
-                true -> State#?STATE{min_load={N, L}};
-                _ -> State
-             end,
+  State1 = case N =:= N0 of
+            true ->
+              State#?STATE{min_load={N, L}};
+            _ ->
+              case L < L0 of
+                true ->
+                  case node() of
+                    N0 ->
+                      erlang:monitor_node(N, true);
+                    N ->
+                      erlang:monitor_node(N0, false);
+                    _ ->
+                      erlang:monitor_node(N0, false),
+                      erlang:monitor_node(N, true)
+                  end,
+                  State#?STATE{min_load={N, L}};
+                false ->
+                  State
+              end
+          end,
     {noreply, case node() of
                 N -> offload(State1);
                 _ -> State1
@@ -214,22 +230,18 @@ offload(State=#?STATE{offloading_threshold=T, load=L}) ->
             % L0 is not low enough to continue offloading.
             lager:notice("{offloading_to, ~p} -> none", [N]),
             alarm_handler:clear_alarm({?SERVER, global}),
-            erlang:monitor_node(N, false),
             State#?STATE{alarm=none};
         {{offloading_to, N}, {N0, _}} when N =/= N0 ->
             % L0 is still low enough and the target node has been changed.
             lager:notice("{offloading_to, ~p} -> {offloading_to, ~p}", [N, N0]),
             Alarm = {offloading_to, N0},
             alarm_handler:set_alarm({{?SERVER, global}, Alarm}),
-            erlang:monitor_node(N, false),
-            erlang:monitor_node(N0, true),
             State#?STATE{alarm=Alarm};
         {none, {N0, L0}} when (N0 =/= node()) and (L0 < 1) and (L >= L0*T) ->
             % It wasn't offloading but L0 becomes low enough to activate offloading.
             lager:notice("none -> {offloading_to, ~p}", [N0]),
             Alarm = {offloading_to, N0},
             alarm_handler:set_alarm({{?SERVER, global}, Alarm}),
-            erlang:monitor_node(N0, true),
             State#?STATE{alarm=Alarm};
         _ ->
             State

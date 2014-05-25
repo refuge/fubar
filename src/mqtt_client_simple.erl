@@ -12,12 +12,12 @@
 %%
 %% Helper interfaces.
 %%
--export([connect/1, reconnect/1, disconnect/1, stop/1]).
+-export([connect/1, reconnect/1, disconnect/1, stop/1, last_message/1]).
 
 %%
 %% mqtt_client behavior callbacks.
 %%
--export([handle_connected/1, handle_disconnected/1, handle_message/2]).
+-export([handle_connected/1, handle_disconnected/1, handle_message/2, handle_event/2]).
 
 %%
 %% Imports and definitions.
@@ -27,7 +27,10 @@
 
 -define(STATE, ?MODULE).
 
--record(?STATE, {client_id}).
+-record(?STATE, {
+	client_id,
+	last_message
+}).
 
 %%
 %% Helper implementations.
@@ -68,6 +71,19 @@ disconnect(Id) ->
 stop(Id) ->
 	mqtt_client:stop(Id).
 
+%% @doc Get the last message received.
+last_message(Id) ->
+	case mqtt_client_sup:get(Id) of
+		{ok, Pid} ->
+			Pid ! {last_message, self()},
+			receive
+				Msg -> {ok, Msg}
+			after 5000 -> {error, timeout}
+			end;
+		Error ->
+			Error
+	end.
+
 %%
 %% mqtt_client behavior implementations.
 %%
@@ -83,4 +99,9 @@ handle_disconnected(#?STATE{client_id=ClientId}) ->
 -spec handle_message(mqtt_message(), #?STATE{}) -> #?STATE{}.
 handle_message(Message, State=#?STATE{client_id=ClientId}) ->
 	lager:notice("~p received ~p", [ClientId, Message]),
+	State#?STATE{last_message=Message#mqtt_publish.payload}.
+
+-spec handle_event(Event :: any(), #?STATE{}) -> #?STATE{}.
+handle_event({last_message, Pid}, State) ->
+	Pid ! State#?STATE.last_message,
 	State.

@@ -63,6 +63,9 @@
 -callback handle_message(mqtt_message(), State :: any()) ->
 		NewState :: any().
 
+-callback handle_event(Event :: any(), State :: any()) ->
+		NewState :: any().
+
 %% @doc Connect an MQTT client.
 %% @param Params a property list with,
 %% 		host = "localhost" :: string()
@@ -111,6 +114,7 @@ send(Pid, Message) when erlang:is_pid(Pid) ->
 	ok;
 send(Id, Message) ->
 	case mqtt_client_sup:get(Id) of
+		{ok, disconnected} -> {error, disconnected};
 		{ok, Pid} -> send(Pid, Message);
 		Error -> Error
 	end.
@@ -124,6 +128,8 @@ state(Client) ->
 				State -> {ok, State}
 			after 5000 -> {error, timeout}
 			end;
+		{error, disconnected} ->
+			{ok, disconnected};
 		Error ->
 			Error
 	end.
@@ -436,9 +442,9 @@ handle_event(Event, State=#?STATE{client_id=ClientId, state=connecting}) ->
 handle_event(no_pingresp, State=#?STATE{client_id=ClientId}) ->
 	lager:info("~p connection lost", [ClientId]),
 	{stop, no_pingresp, State};
-handle_event(Event, State) ->
-	lager:warning("~p dropping unknown event ~p", [State#?STATE.client_id, Event]),
-	{noreply, State, timeout(State#?STATE.timeout, State#?STATE.timestamp)}.
+handle_event(Event, State=#?STATE{handler=Handler}) ->
+	HandlerState = Handler:handle_event(Event, State#?STATE.handler_state),
+	{noreply, State#?STATE{handler_state=HandlerState}, timeout(State#?STATE.timeout, State#?STATE.timestamp)}.
 
 %% @doc Finalize the client process.
 -spec terminate(term(), #?STATE{}) -> term().

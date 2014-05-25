@@ -25,13 +25,12 @@ mqtt_connect(Config, State) ->
 				% <<"000000">>, <<"000001">,...
 				Id = erlang:list_to_binary(io_lib:format("~6..0B", [N])),
 				% Clients must start ok.
-				true = erlang:is_pid(
-						mqtt_client:start([
-							{client_id, Id}, {port, Port} | Params])),
+				{ok, Pid} = mqtt_client_simple:connect([
+							{client_id, Id}, {port, Port} | Params]),
 				ct:log("client ~p connecting to ~p", [Id, Port]),
 				% Wait a short while to make sure connected or rejected.
 				ct:sleep(?WAIT),
-				State = mqtt_client:state(Id),
+				{ok, State} = mqtt_client:state(Id),
 				N + 1
 			end,
 			0,
@@ -44,10 +43,10 @@ mqtt_disconnect(Config, State) ->
 	lists:foreach(
 		fun(Id) ->
 			ct:log("client ~p disconnecting", [Id]),
-			mqtt_client:stop(Id),
+			mqtt_client:disconnect(Id),
 			% Wait a short while to make sure disconnected.
 			ct:sleep(?WAIT),
-			State = mqtt_client:state(Id)
+			{ok, State} = mqtt_client:state(Id)
 		end,
 		Ids),
 	proplists:delete(clients, Config).
@@ -75,7 +74,7 @@ mqtt_pubsub(Config) ->
 			ct:sleep(?WAIT),
 			lists:foreach(
 				fun(Id1) ->
-					Id = mqtt_client:last_message(Id1)
+					{ok, Id} = mqtt_client_simple:last_message(Id1)
 				end,
 				Ids)
 		end,
@@ -104,7 +103,7 @@ mqtt_direct(Config) ->
 			ct:sleep(?WAIT),
 			lists:foreach(
 				fun(Id1) ->
-					Id = mqtt_client:last_message(Id1)
+					{ok, Id} = mqtt_client_simple:last_message(Id1)
 				end,
 				Ids)
 		end,

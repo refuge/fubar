@@ -72,11 +72,10 @@ reconnect(Id) ->
 -spec disconnect(Id :: term()) -> ok | {error, reason()}.
 disconnect(Id) ->
 	case ?MODULE:get(Id) of
+		{ok, disconnected} ->
+			{error, already_disconnected};
 		{ok, Pid} ->
 			mqtt_client:send(Pid, mqtt:disconnect([]));
-		{error, stopped} ->
-			reconnect(Id),
-			disconnect(Id);
 		Error ->
 			Error
 	end.
@@ -94,7 +93,7 @@ get(Id) ->
 			{error, not_exists};
 		{Id, undefined, worker, _} ->
 			% Found an id which is not running.
-			{error, stopped};
+			{ok, disconnected};
 		{Id, Pid, worker, _} ->
 			{ok, Pid};
 		Error ->
