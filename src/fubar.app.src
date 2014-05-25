@@ -3,7 +3,7 @@
   {description, "Scalable MQTT message broker"},
   {vsn, "3.0.0"},
   {registered, []},
-  {applications, [kernel, stdlib, sasl, lager, cpg, mnesia, ranch, cowboy]},
+  {applications, [kernel, stdlib, sasl, lager, cpg, mnesia, ssl, ranch, cowboy]},
   {mod, {fubar_app, []}},
   {env, []}
  ]

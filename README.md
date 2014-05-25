@@ -61,19 +61,23 @@ You can check the broker state.
 
 ### Playing with the broker ###
 
+#### Preparing an account for test ####
+
+	$ make account-set username=test password=test
+
 #### Getting into the broker shell ####
 
 	$ make debug
 	
 #### Connecting clients ####
 
-	1> C1 = mqtt_client:start([{client_id,<<"c1">>}, {username,<<"test">>}, {password,<<"1234">>}]).
-	2> C2 = mqtt_client:start([{client_id,<<"c2">>}, {username,<<"test">>}, {password,<<"1234">>}]).
+	1> mqtt_client_simple:connect([{client_id,<<"c1">>}, {username,<<"test">>}, {password,<<"1234">>}]).
+	2> mqtt_client_simple:connect([{client_id,<<"c2">>}, {username,<<"test">>}, {password,<<"1234">>}]).
 
 #### Subscribing and publishing messages ####
 
-	3> C1 ! mqtt:subscribe([{topics, [<<"t1">>]}]).
-	4> C2 ! mqtt:publish([{topic, <<"t1">>}, {payload, <<"hello!">>}]).
+	3> mqtt_client:send(<<"c1">>, mqtt:subscribe([{topics, [<<"t1">>]}])).
+	4> mqtt_client:send(<<"c2">>, mqtt:publish([{topic, <<"t1">>}, {payload, <<"hello!">>}]).
 
 #### Direct messaging ####
 
@@ -81,7 +85,7 @@ This is an extra feature not originally stated in MQTT specification.
 One client may use the other client's client id as a topic name to
 send a message directly to the client.
 
-	5> C2 ! mqtt:publish([{topic, <<"c1">>}, {payload, <<"world!">>}]).
+	5> mqtt_client:send(<<"c2">>, mqtt:publish([{topic, <<"c1">>}, {payload, <<"world!">>}]).
 
 #### Getting out of the broker shell ####
 
@@ -116,7 +120,7 @@ Manage account using make commands like,
 	$
 
 `{auth, mqtt_account}` line can be commented out from **fubar.config** to
-disable account authentication (default).  In this case, anyone may connect
+disable account authentication.  In this case, anyone may connect
 the broker without username/password.
 
 ### Using ACL control ###
@@ -141,18 +145,19 @@ with correct username/password.
 
 Full list of client parameters are:
 
-	1> C3 = mqtt_client:start([{hostname, "localhost"},
-	                           {port, 1884},
-	                           {username, <<"romeo">>},
-	                           {password, <<"1234">>},
-	                           {client_id, <<"c1">>},
-	                           {keep_alive, 60},
-	                           clean_session,
-	                           {will_topic, <<"will">>},
-	                           {will_message, <<"bye-bye">>},
-	                           {will_qos, at_least_once},
-	                           will_retain,
-	                           socket_options, [...]]).
+	1> C3 = mqtt_client_simple:connect([
+						{hostname, "localhost"},
+	          {port, 1884},
+	          {username, <<"romeo">>},
+	          {password, <<"1234">>},
+	          {client_id, <<"c1">>},
+	          {keep_alive, 60},
+	          clean_session,
+	          {will_topic, <<"will">>},
+	          {will_message, <<"bye-bye">>},
+	          {will_qos, at_least_once},
+	          will_retain,
+	          socket_options, [...]]).
 
 Refer `inet:setopts/2` for `socket_options` above.
 
@@ -215,7 +220,7 @@ If it succeeds, use `{transport, ranch_ssl}` option on the client side.
 
 	$ make client
 	1> ssl:start().
-	2> mqtt_client:start([{port, 8883},{transport, ranch_ssl}, {client_id, <<"ssltest">>}]).
+	2> mqtt_client_simple:connect([{port, 8883}, {transport, ranch_ssl}, {client_id, <<"ssltest">>}]).
 
 ### Load balancing ###
 

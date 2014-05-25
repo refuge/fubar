@@ -37,6 +37,7 @@ start() ->
 	ensure_started(lager),
 	ensure_started(cpg),
 	ensure_started(mnesia),
+	ensure_started(ssl),
 	ensure_started(ranch),
 	ensure_started(cowboy),
 	Res = application:start(?APPLICATION),
