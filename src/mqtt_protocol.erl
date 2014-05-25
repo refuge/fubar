@@ -37,19 +37,23 @@
 %%
 %% mqtt_protocol behavior callback definition
 %%
--callback init(State :: term()) ->
-			{reply, mqtt_message(), State :: term(), timeout()} |
-			{noreply, State :: term(), timeout()} |
-			{stop, Reason :: term()}.
--callback handle_message(mqtt_message(), State :: term()) ->
-			{reply, mqtt_message(), State :: term(), timeout()} |
-			{noreply, State :: term(), timeout()} |
-			{stop, Reason :: term()}.
--callback handle_event(Event :: term(), State :: term()) ->
-			{reply, mqtt_message(), State :: term(), timeout()} |
-			{noreply, State :: term(), timeout()} |
-			{stop, Reason :: term()}.
--callback terminate(Reason :: term(), State :: term()) -> Reason :: term().
+-callback init(Context :: term()) ->
+		{reply, mqtt_message(), NewContext :: term(), timeout()} |
+		{noreply, NewContext :: term(), timeout()} |
+		{stop, Reason :: term()}.
+
+-callback handle_message(mqtt_message(), Context :: term()) ->
+		{reply, mqtt_message(), NewContext :: term(), timeout()} |
+		{noreply, NewContext :: term(), timeout()} |
+		{stop, Reason :: term()}.
+
+-callback handle_event(Event :: term(), Context :: term()) ->
+		{reply, mqtt_message(), NewContext :: term(), timeout()} |
+		{noreply, NewContext :: term(), timeout()} |
+		{stop, Reason :: term()}.
+		
+-callback terminate(Reason :: term(), Context :: term()) ->
+		Reason :: term().
 
 %%
 %% gen_server state

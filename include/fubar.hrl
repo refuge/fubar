@@ -15,6 +15,7 @@
 -type param() :: {atom(), term()}.
 -type proplist(Key, Value) :: [{Key, Value} | Key].
 -type params() :: proplist(atom(), term()).
+-type reason() :: term().
 -type word() :: 0..65535.
 -type timestamp() :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}.
 

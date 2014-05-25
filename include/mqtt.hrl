@@ -38,8 +38,10 @@
 					   max_recursion = 0 :: integer(),
 					   extra = <<>> :: binary()}).
 
--record(mqtt_connack, {code = accepted :: accepted | incompatible | id_rejected |
-						   unavailable | forbidden | unauthorized | alt_server | undefined,
+-type mqtt_connack_code() :: accepted | incompatible | id_rejected | unavailable |
+		forbidden | unauthorized | alt_server.
+
+-record(mqtt_connack, {code = accepted :: mqtt_connack_code(),
 					   alt_server = <<>> :: binary(),
 					   max_recursion = 0 :: integer(),
 					   extra = <<>> :: binary()}).
