@@ -63,7 +63,7 @@ You can check the broker state.
 
 #### Preparing an account for test ####
 
-	$ make account-set username=test password=test
+	$ make account-set username=test password=1234
 
 #### Getting into the broker shell ####
 
@@ -77,7 +77,7 @@ You can check the broker state.
 #### Subscribing and publishing messages ####
 
 	3> mqtt_client:send(<<"c1">>, mqtt:subscribe([{topics, [<<"t1">>]}])).
-	4> mqtt_client:send(<<"c2">>, mqtt:publish([{topic, <<"t1">>}, {payload, <<"hello!">>}]).
+	4> mqtt_client:send(<<"c2">>, mqtt:publish([{topic, <<"t1">>}, {payload, <<"hello!">>}])).
 
 #### Direct messaging ####
 
@@ -85,7 +85,7 @@ This is an extra feature not originally stated in MQTT specification.
 One client may use the other client's client id as a topic name to
 send a message directly to the client.
 
-	5> mqtt_client:send(<<"c2">>, mqtt:publish([{topic, <<"c1">>}, {payload, <<"world!">>}]).
+	5> mqtt_client:send(<<"c2">>, mqtt:publish([{topic, <<"c1">>}, {payload, <<"world!">>}])).
 
 #### Getting out of the broker shell ####
 
