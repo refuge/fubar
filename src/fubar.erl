@@ -1,7 +1,7 @@
 %%% -------------------------------------------------------------------
 %%% Author  : Sungjin Park <jinni.park@gmail.com>
 %%%
-%%% Description : fubar utility functions. 
+%%% Description : fubar utility functions.
 %%%
 %%% Created : Nov 14, 2012
 %%% -------------------------------------------------------------------
