@@ -1,3 +1,4 @@
+REBAR?= rebar
 .SILENT: state stop acl-all acl-get acl-set acl-del account-all account-get account-set account-del
 
 ###############################################################################
@@ -15,7 +16,7 @@ APP=fubar
 
 # Compile source codes only.
 compile:
-	./rebar compile
+	@$(REBAR) compile
 
 LOGDIR=log
 DATADIR=priv/data
@@ -115,17 +116,17 @@ debug:
 
 # Perform unit tests.
 check: compile
-	./rebar eunit skip_deps=true
+	@$(REBAR) eunit skip_deps=true
 
 # Perform common tests.
 test: compile
-	./rebar ct suites=$(APP) skip_deps=true
+	@$(REBAR) ct suites=$(APP) skip_deps=true
 
 # Clear all the binaries and dependencies.  The data remains intact.
 clean: delete-deps
 	rm -rf *.dump
 	rm -rf test/*.beam
-	./rebar clean
+	@$(REBAR) clean
 
 # Clear all data.
 reset:
@@ -133,16 +134,16 @@ reset:
 
 # Generate documents.
 doc:
-	./rebar doc
+	@$(REBAR) doc
 
 # Update dependencies.
 deps: get-deps
-	./rebar update-deps
+	@$(REBAR) update-deps
 
 # Download dependencies.
 get-deps:
-	./rebar get-deps
+	@$(REBAR) get-deps
 
 # Delete dependencies.
 delete-deps:
-	./rebar delete-deps
+	@$(REBAR) delete-deps
