@@ -6,3 +6,4 @@ log/
 logs/
 priv/data/
 .eunit/
+.rebar/
