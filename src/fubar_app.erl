@@ -29,7 +29,7 @@
 start(_StartType, _StartArgs) ->
 	Settings = ?PROPS_TO_RECORD(fubar:settings(?MODULE), ?MODULE),
 	{ok, Pid} = fubar_sup:start_link(),
-	case {string:to_integer(os:getenv("MQTT_PORT")), Settings#?MODULE.max_connections} of
+	case {get_env(mqtt_port), Settings#?MODULE.max_connections} of
 		{{error, _}, _} ->
 			ok;
 		{{MQTTPort, _}, MQTTMax} ->
@@ -38,7 +38,7 @@ start(_StartType, _StartArgs) ->
 											 Settings#?MODULE.options],
 								 mqtt_protocol, [{dispatch, mqtt_server}])
 	end,
-	case {string:to_integer(os:getenv("MQTTS_PORT")), Settings#?MODULE.max_connections} of
+	case {get_env(mqtts_port), Settings#?MODULE.max_connections} of
 		{{error, _}, _} ->
 			ok;
 		{{MQTTSPort, _}, MQTTSMax} ->
@@ -52,7 +52,7 @@ start(_StartType, _StartArgs) ->
 			{"/websocket", websocket_protocol, [{dispatch, mqtt_server}]}
 		]}
 	]),
-	case {string:to_integer(os:getenv("HTTP_PORT")), Settings#?MODULE.max_connections} of
+	case {get_env(http_port), Settings#?MODULE.max_connections} of
 		{{error, _}, _} ->
 			ok;
 		{{HTTPPort, _}, HTTPMax} ->
@@ -65,3 +65,12 @@ start(_StartType, _StartArgs) ->
 
 stop(_State) ->
 	timer:apply_after(0, application, stop, [ranch]).
+
+get_env(Key) ->
+    get_env(Key, undefined).
+
+get_env(Key, Default) ->
+    case application:get_env(fubar, Key) of
+        {ok, Value} -> Value;
+        _ -> Default
+    end.
