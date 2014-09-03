@@ -1,5 +1,6 @@
 REBAR?= rebar
-.SILENT: state stop acl-all acl-get acl-set acl-del account-all account-get account-set account-del
+.SILENT: state stop acl-all acl-get acl-set acl-del account-all account-get account-set account-del 
+.PHONY: rel
 
 ###############################################################################
 ## Make parameters
@@ -147,3 +148,6 @@ get-deps:
 # Delete dependencies.
 delete-deps:
 	@$(REBAR) delete-deps
+
+rel:
+	@$(REBAR) generate
