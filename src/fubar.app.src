@@ -1,14 +1,28 @@
 %% -*- tab-width: 4;erlang-indent-level: 4;indent-tabs-mode: nil -*-
 %% ex: ft=erlang ts=4 sw=4 et
 
-{application, fubar,
-    [
-        {description, "Scalable MQTT message broker"},
-        {vsn, "3.0.0"},
-        {registered, []},
-        {applications, [kernel, stdlib, sasl, lager, cpg, mnesia, ssl,
-                        ranch, cowboy]},
-        {mod, {fubar_app, []}},
-        {env, []}
-        ]
-    }.
+{application, fubar, [
+    {description, "Scalable MQTT message broker"},
+    {vsn, "3.0.0"},
+    {registered, []},
+    {applications, [
+        kernel,
+        stdlib,
+        sasl,
+        lager,
+        cpg,
+        mnesia,
+        ssl,
+        ranch,
+        cowboy
+    ]},
+    {mod, {fubar_app, []}},
+    {env, [
+        {node, "fubar"},
+        {master, undefined},
+        {mqtt_port, 1883},
+        {mqtts_port, undefined},
+        {http_port, undefined},
+        {cookie, <<"sharedsecretamongnodesofafubarcluster_youneedtochangethisforsecurity">>}
+    ]}
+]}.
