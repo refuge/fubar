@@ -149,5 +149,5 @@ get-deps:
 delete-deps:
 	@$(REBAR) delete-deps
 
-rel:
+rel: compile
 	@$(REBAR) generate
