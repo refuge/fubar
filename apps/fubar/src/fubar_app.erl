@@ -26,7 +26,7 @@
 				  options = []}).
 
 start_mqtt_listener(EnvPort, Settings) ->
-	Port = application:get_env(?APPLICATION, EnvPort),
+	{ok, Port} = application:get_env(?APPLICATION, EnvPort),
 
 	MaxConnections = Settings#?MODULE.max_connections,
 	Options = Settings#?MODULE.options,
@@ -36,18 +36,25 @@ start_mqtt_listener(EnvPort, Settings) ->
 		{undefined, _} ->
 			ok;
 		_ ->
-			ranch:start_listener(
+			Started = ranch:start_listener(
 				mqtt,
 				Acceptors,
 				ranch_tcp,
 				[{port, Port}, {max_connections, MaxConnections} | Options],
 				mqtt_protocol,
 				[{dispatch, mqtt_server}]
-			)
+			),
+
+			case Started of
+				{error, _} ->
+					ok;
+				_ ->
+					Started
+			end
 	end.
 
 start_mqtts_listener(EnvPort, Settings) ->
-	Port = application:get_env(?APPLICATION, EnvPort),
+	{ok, Port} = application:get_env(?APPLICATION, EnvPort),
 
 	MaxConnections = Settings#?MODULE.max_connections,
 	Options = Settings#?MODULE.options,
@@ -56,18 +63,26 @@ start_mqtts_listener(EnvPort, Settings) ->
 	case {Port, MaxConnections} of
 		{undefined, _} -> ok;
 		_ ->
-			ranch:start_listener(
+			Started = ranch:start_listener(
 				mqtts,
 				Acceptors,
 				ranch_ssl,
 				[{port, Port}, {max_connections, MaxConnections} | Options],
 				mqtt_protocol,
 				[{dispatch, mqtt_server}]
-			)
+			),
+
+			case Started of
+				{error, _} ->
+					ok;
+				_ ->
+					Started
+			end
+
 	end.
 
 start_websocket_listener(EnvPort, Settings) ->
-	Port = application:get_env(?APPLICATION, EnvPort),
+	{ok, Port} = application:get_env(?APPLICATION, EnvPort),
 
 	MaxConnections = Settings#?MODULE.max_connections,
 	Options = Settings#?MODULE.options,
@@ -82,12 +97,19 @@ start_websocket_listener(EnvPort, Settings) ->
 				]}
 			]),
 
-			cowboy:start_http(
+			Started = cowboy:start_http(
 				http,
 				Acceptors,
 				[{port, Port}, {max_connections, MaxConnections} | Options],
 				[{env, [{dispatch, Dispatch}]}]
-			)
+			),
+
+			case Started of
+				{error, _} ->
+					ok;
+				_ ->
+					Started
+			end
 	end.
 
 %%
