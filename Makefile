@@ -14,13 +14,13 @@ cookie=sharedsecretamongnodesofafubarcluster_youneedtochangethisforsecurity
 
 ## Static values
 APP=fubar
+LOGDIR=log
+DATADIR=priv/data
 
 # Compile source codes only.
 compile:
 	@$(REBAR) compile
 
-LOGDIR=log
-DATADIR=priv/data
 
 # Start a daemon
 # Params: node (default fubar), master (in node@host format),
@@ -28,12 +28,12 @@ DATADIR=priv/data
 run: compile
 	mkdir -p $(DATADIR)
 	mkdir -p $(LOGDIR)
-	erl -pa ebin deps/*/ebin +A 100 +K true +P 10000000 +W w +swt low +Mummc 99999 \
-		-sname $(node) -setcookie $(cookie) -detached -config $(APP) \
-		-mnesia dir '"$(DATADIR)/$(node)"' \
-		-s $(APP) \
-		-env MQTT_PORT $(mqtt_port) -env MQTTS_PORT $(mqtts_port) -env HTTP_PORT $(http_port) \
-		-env FUBAR_MASTER $(master)
+
+	erl -pa apps/*/ebin deps/*/ebin +A 100 +K true +P 10000000 +W w \
+		+swt low +Mummc 99999 \
+		-sname fubar -setcookie cookie -config fubar \
+		-mnesia dir '"priv/data/fubar"' \
+		-s fubar
 
 # Stop a daemon
 # Params: node (default fubar), cookie
