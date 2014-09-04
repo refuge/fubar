@@ -95,11 +95,139 @@ main(Args) ->
                 Other ->
                     io:format("~p\n", [Other])
             end;
+
+        ["state"] ->
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [fubar, state]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+        ["acl-all"] ->
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [fubar, acl, all]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+        ["acl-get", InternetAddress] ->
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [fubar, acl, get, InternetAddress]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+        ["acl-set", InternetAddress, Allow] ->
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [fubar, acl, get, InternetAddress, parse_boolean(Allow)]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+        ["acl-del", InternetAddress] ->
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [fubar, acl, del, InternetAddress]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+        ["account-all"] ->
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [fubar, account, all]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+        ["account-get", Username] ->
+            io:format("TargetNode: ~p~n", [TargetNode]),
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [[fubar, account, del, list_to_atom(Username)]]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+        ["account-set", Username, Password] ->
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [fubar, account, set, Username, Password]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+        ["account-del", Username] ->
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [fubar, account, del, Username]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+        ["trace", ClientId, Active] ->
+            case rpc:call(TargetNode,
+                          fubar_control, call,
+                          [fubar, trace, ClientId, parse_boolean(Active)]) of
+                {badrpc, Reason} ->
+                    io:format("RPC to ~p failed: ~p~n", [TargetNode, Reason]),
+                    halt(1);
+                Other ->
+                    io:format("~p~n", [Other])
+            end;
+
+
         Other ->
             io:format("Other: ~p\n", [Other]),
             io:format("Usage: nodetool {chkconfig|getpid|ping|stop|restart|reboot|rpc|rpc_infinity|rpcterms}\n")
     end,
     net_kernel:stop().
+
+parse_boolean(true) -> true;
+parse_boolean(false) -> false;
+
+parse_boolean(Val) when is_binary(Val) ->
+    parse_boolean(binary_to_list(Val));
+
+parse_boolean(Val) ->
+    case string:to_lower(Val) of
+        "true" -> true;
+        "false" -> false;
+        _ ->
+            Msg = io_lib:format("Invalid boolean parameter: ~p", [Val]),
+            throw({query_parse_error, list_to_binary(Msg)})
+    end.
 
 process_args([], Acc, TargetNode) ->
     {lists:reverse(Acc), TargetNode};
