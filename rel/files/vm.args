@@ -9,11 +9,26 @@
 ##-heart
 
 ## Enable kernel poll and a few async threads
-##+K true
-##+A 5
++K true
++A 100
 
 ## Increase number of concurrent ports/sockets
 ##-env ERL_MAX_PORTS 4096
 
 ## Tweak GC to run more often
 ##-env ERL_FULLSWEEP_AFTER 10
+
+## Sets the mapping of warning messages for error_logger.
++W w
+
+## Set scheduler wakeup threshold. Default is medium.
+## The threshold determines when to wake up sleeping schedulers when more work
+## than can be handled by currently awake schedulers exist.
++swt low
+
+## Max mseg_alloc carriers. Maximum number of carriers placed in separate
+## memory segments. When this limit has been reached, new carriers will be
+## placed in memory retrieved from sys_alloc.
++Mummc 99999
+
+## -detacted
