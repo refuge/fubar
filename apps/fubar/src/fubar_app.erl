@@ -23,54 +23,85 @@
 				  max_connections = infinity :: timeout(),
 				  options = []}).
 
+start_mqtt_listener(EnvPort, Settings) ->
+	Port = fubar_util:get_env(EnvPort),
+
+	MaxConnections = Settings#?MODULE.max_connections,
+	Options = Settings#?MODULE.options,
+	Acceptors = Settings#?MODULE.acceptors,
+
+	case {Port, MaxConnections} of
+		{undefined, _} ->
+			ok;
+		_ ->
+			ranch:start_listener(
+				mqtt,
+				Acceptors,
+				ranch_tcp,
+				[{port, Port}, {max_connections, MaxConnections} | Options],
+				mqtt_protocol,
+				[{dispatch, mqtt_server}]
+			)
+	end.
+
+start_mqtts_listener(EnvPort, Settings) ->
+	Port = fubar_util:get_env(EnvPort),
+
+	MaxConnections = Settings#?MODULE.max_connections,
+	Options = Settings#?MODULE.options,
+	Acceptors = Settings#?MODULE.acceptors,
+
+	case {Port, MaxConnections} of
+		{undefined, _} -> ok;
+		_ ->
+			ranch:start_listener(
+				mqtts,
+				Acceptors,
+				ranch_ssl,
+				[{port, Port}, {max_connections, MaxConnections} | Options],
+				mqtt_protocol,
+				[{dispatch, mqtt_server}]
+			)
+	end.
+
+start_websocket_listener(EnvPort, Settings) ->
+	Port = fubar_util:get_env(EnvPort),
+
+	MaxConnections = Settings#?MODULE.max_connections,
+	Options = Settings#?MODULE.options,
+	Acceptors = Settings#?MODULE.acceptors,
+
+	case {Port, MaxConnections} of
+		{undefined, _} -> ok;
+		_ ->
+			Dispatch = cowboy_router:compile([
+				{'_', [
+					{"/websocket", websocket_protocol, [{dispatch, mqtt_server}]}
+				]}
+			]),
+
+			cowboy:start_http(
+				http,
+				Acceptors,
+				[{port, Port}, {max_connections, MaxConnections} | Options],
+				[{env, [{dispatch, Dispatch}]}]
+			)
+	end.
+
 %%
 %% Application callbacks
 %%
 start(_StartType, _StartArgs) ->
 	Settings = ?PROPS_TO_RECORD(fubar:settings(?MODULE), ?MODULE),
+
 	{ok, Pid} = fubar_sup:start_link(),
-	case {get_env(mqtt_port), Settings#?MODULE.max_connections} of
-		{{error, _}, _} ->
-			ok;
-		{{MQTTPort, _}, MQTTMax} ->
-			ranch:start_listener(mqtt, Settings#?MODULE.acceptors,
-								 ranch_tcp, [{port, MQTTPort}, {max_connections, MQTTMax} |
-											 Settings#?MODULE.options],
-								 mqtt_protocol, [{dispatch, mqtt_server}])
-	end,
-	case {get_env(mqtts_port), Settings#?MODULE.max_connections} of
-		{{error, _}, _} ->
-			ok;
-		{{MQTTSPort, _}, MQTTSMax} ->
-			ranch:start_listener(mqtts, Settings#?MODULE.acceptors,
-								 ranch_ssl, [{port, MQTTSPort}, {max_connections, MQTTSMax} |
-											 Settings#?MODULE.options],
-								 mqtt_protocol, [{dispatch, mqtt_server}])
-	end,
-	Dispatch = cowboy_router:compile([
-		{'_', [
-			{"/websocket", websocket_protocol, [{dispatch, mqtt_server}]}
-		]}
-	]),
-	case {get_env(http_port), Settings#?MODULE.max_connections} of
-		{{error, _}, _} ->
-			ok;
-		{{HTTPPort, _}, HTTPMax} ->
-			cowboy:start_http(http, Settings#?MODULE.acceptors,
-							  [{port, HTTPPort}, {max_connections, HTTPMax} |
-							   Settings#?MODULE.options],
-							  [{env, [{dispatch, Dispatch}]}])
-	end,
+
+	start_mqtt_listener(mqtt_port, Settings),
+	start_mqtts_listener(mqtts_port, Settings),
+	start_websocket_listener(http_port, Settings),
+
 	{ok, Pid}.
 
 stop(_State) ->
 	timer:apply_after(0, application, stop, [ranch]).
 
-get_env(Key) ->
-    get_env(Key, undefined).
-
-get_env(Key, Default) ->
-    case application:get_env(fubar, Key) of
-        {ok, Value} -> Value;
-        _ -> Default
-    end.
