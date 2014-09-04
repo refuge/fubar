@@ -1,5 +1,5 @@
 ## Name of the node
--name fubar@127.0.0.1
+-sname fubar
 
 ## Cookie for distributed erlang
 -setcookie fubar
