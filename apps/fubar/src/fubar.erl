@@ -193,20 +193,20 @@ ensure_started(App) ->
 	end.
 
 prestart(cpg) ->
-	case list_to_atom(os:getenv("FUBAR_MASTER")) of
+	case fubar_util:get_env(fubar_master) of
 		undefined ->
 			ok;
 		Master ->
 			pong = net_adm:ping(Master)
 	end;
 prestart(mnesia) ->
-	case list_to_atom(os:getenv("FUBAR_MASTER")) of
+	case fubar_util:get_env(fubar_master) of
 		undefined ->
 			% schema must be created in standalone mode
 			mnesia:create_schema([node()]);
 		_Master ->
 			% join a cluster and clear stale replica
-			case list_to_atom(os:getenv("FUBAR_MASTER")) of
+			case fubar_util:get_env(fubar_master) of
 				undefined ->
 					ok;
 				Master ->
@@ -221,7 +221,7 @@ prestart(_) ->
 	ok.
 
 poststart(mnesia) ->
-	case list_to_atom(os:getenv("FUBAR_MASTER")) of
+	case fubar_util:get_env(fubar_master) of
 		undefined ->
 			apply_all_module_attributes_of(create_mnesia_tables);
 		Master ->
@@ -242,7 +242,7 @@ ensure_stopped([[App, _] | T]) ->
 	ensure_stopped(T).
 
 prestop(mnesia) ->
-	case list_to_atom(os:getenv("FUBAR_MASTER")) of
+	case fubar_util:get_env(fubar_master) of
 		undefined ->
 			apply_all_module_attributes_of(destroy_mnesia_tables);
 		_Master ->
