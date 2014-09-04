@@ -16,6 +16,8 @@
 
 -include("props_to_record.hrl").
 
+-define(APPLICATION, fubar).
+
 %%
 %% Records
 %%
@@ -24,7 +26,7 @@
 				  options = []}).
 
 start_mqtt_listener(EnvPort, Settings) ->
-	Port = fubar_util:get_env(EnvPort),
+	Port = application:get_env(?APPLICATION, EnvPort),
 
 	MaxConnections = Settings#?MODULE.max_connections,
 	Options = Settings#?MODULE.options,
@@ -45,7 +47,7 @@ start_mqtt_listener(EnvPort, Settings) ->
 	end.
 
 start_mqtts_listener(EnvPort, Settings) ->
-	Port = fubar_util:get_env(EnvPort),
+	Port = application:get_env(?APPLICATION, EnvPort),
 
 	MaxConnections = Settings#?MODULE.max_connections,
 	Options = Settings#?MODULE.options,
@@ -65,7 +67,7 @@ start_mqtts_listener(EnvPort, Settings) ->
 	end.
 
 start_websocket_listener(EnvPort, Settings) ->
-	Port = fubar_util:get_env(EnvPort),
+	Port = application:get_env(?APPLICATION, EnvPort),
 
 	MaxConnections = Settings#?MODULE.max_connections,
 	Options = Settings#?MODULE.options,
