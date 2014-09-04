@@ -22,7 +22,7 @@
         {master, undefined},
         {mqtt_port, 1883},
         {mqtts_port, undefined},
-        {http_port, undefined},
+        {http_port, 8080},
         {cookie, <<"sharedsecretamongnodesofafubarcluster_youneedtochangethisforsecurity">>}
     ]}
 ]}.
