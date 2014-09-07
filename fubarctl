@@ -1,0 +1,203 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -pa deps/*/ebin -Wall
+-module(fubarctl).
+
+-record(state, {
+    command :: string(),
+
+    host :: string(),
+    cookie :: string(),
+    targetNode :: atom(),
+    ip :: string(),
+
+    username = undefined :: string(),
+    password = undefined :: string()
+}).
+
+
+-define(PROPS_TO_RECORD(Props, Record), ?PROPS_TO_RECORD(Props, Record, #Record{})()).
+-define(PROPS_TO_RECORD(Props, Record, Default),
+        fun() ->
+            Fields = record_info(fields, Record),
+            [Record | Defaults] = tuple_to_list(Default),
+            List = [proplists:get_value(F, Props, D) || {F, D} <- lists:zip(Fields, Defaults)],
+            list_to_tuple([Record | List])
+        end).
+
+add_paths() ->
+    code:add_paths(filelib:wildcard("./deps/*/ebin", "./")).
+
+usage() ->
+    OptionSpecList = option_spec_list(),
+    ScriptName = escript:script_name(),
+
+    getopt:usage(
+        OptionSpecList, ScriptName,
+        "[command ...]",
+        [{"command", "Commands that will be executed"}]
+    ).
+
+
+arguments_to_record([], State) ->
+    State;
+
+arguments_to_record([{Key, Value}|Rest], State) ->
+    arguments_to_record(Rest, State#state{Key=Value});
+
+arguments_to_record(_, _State) ->
+    badarg.
+
+
+parse_arguments(Options, NonOptArgs) ->
+    erlang:display(arguments_to_record(Options)),
+    State = ?PROPS_TO_RECORD(Options, state),
+    [Command|_] = NonOptArgs,
+    State#state{command=Command}.
+
+main([]) ->
+    add_paths(),
+    usage();
+
+main(Args) ->
+    add_paths(),
+    ok = start_epmd(),
+
+    OptSpecList = option_spec_list(),
+
+    %% FIXME: Check if the node is currently running or not.
+    case getopt:parse(OptSpecList, Args) of
+        {ok, {Options, NonOptArgs}} ->
+            erlang:display(Options),
+            erlang:display(NonOptArgs),
+            State = parse_arguments(Options, NonOptArgs),
+            case execute_command(State) of
+                {error, Msg} ->
+                    io:format("Error: ~s~n", [Msg]),
+                    usage();
+                {ok, Value} ->
+                    io:format("~p~n", [Value])
+            end;
+        {error, {Reason, Data}} ->
+            io:format("Error: ~s ~p~n~n", [Reason, Data]),
+            usage()
+    end.
+
+
+option_spec_list() ->
+    [
+        {host,      undefined, "host",      {string, "fubar"},  "Host name or IP address"},
+        {cookie,    undefined, "cookie",    {string, "fubar"},  "Cookie for the Erlang cluster"},
+        {username,  undefined, "username",  string,             "Username"},
+        {password,  undefined, "password",  string,             "Password"},
+        {ip,        undefined, "ip",        string,             "Internet Address"},
+        {help,      $h,        "help",      undefined,          "Show the program options"}
+    ].
+
+execute_command(#state{host=Hostname, cookie=Cookie}=State) ->
+    TargetNode = nodename(Hostname),
+    ThisNode = append_node_suffix(Hostname, "_maint_"),
+
+    {ok, _} = net_kernel:start([ThisNode, shortnames]),
+    erlang:set_cookie(node(), list_to_atom(Cookie)),
+
+    Result = command(State#state{targetNode=TargetNode}),
+
+    net_kernel:stop(),
+
+    Result.
+
+command(#state{command="getpid", targetNode=TargetNode}=_State) ->
+    Pid = rpc:call(TargetNode, os, getpid, []),
+    {ok, list_to_integer(Pid)};
+
+command(#state{command="state", targetNode=Node}=_State) ->
+    call_fubar_control(Node, [[Node, state]]);
+
+command(#state{command="acl-all", targetNode=Node}=_State) ->
+    call_fubar_control(Node, [[Node, acl, all]]);
+
+command(#state{command="acl-get", targetNode=Node, ip=IpAddress}=_State) ->
+    call_fubar_control(Node, [[Node, acl, get, IpAddress]]);
+
+%% FIXME: Read the Allow value
+command(#state{command="acl-set", targetNode=Node, ip=IpAddress}=_State) ->
+    call_fubar_control(Node, [[Node, acl, set, IpAddress]]);
+
+command(#state{command="acl-del", targetNode=Node, ip=IpAddress}=_State) ->
+    call_fubar_control(Node, [[Node, acl, del, IpAddress]]);
+
+command(#state{command="account-all", targetNode=Node}=_State) ->
+    call_fubar_control(Node, [[Node, account, all]]);
+
+command(#state{command="account-get", targetNode=Node, username=Username}=_State) ->
+    call_fubar_control(Node, [[Node, account, get, Username]]);
+
+command(#state{command="account-set", targetNode=Node, username=Username, password=Password}=_State) ->
+    call_fubar_control(Node, [[Node, account, set, Username, Password]]);
+
+command(#state{command="account-del", targetNode=Node, username=Username}=_State) ->
+    call_fubar_control(Node, [[Node, account, del, Username]]);
+
+% FIXME: Read the ClientID and the Active field from the command-line
+% command(#state{command=}=_State)) ->
+%     call_fubar_control(Node, [[Node, trace]])
+
+command(#state{command=BadCommand}=_State) ->
+    Message = io_lib:format("The command ~p does not exist", [BadCommand]),
+    {error, list_to_binary(Message)}.
+
+call_fubar_control(Node, Args) ->
+    Result = rpc:call(Node, fubar_control, call, Args),
+    {ok, Result}.
+
+start_epmd() ->
+    [] = os:cmd(epmd_path() ++ " -daemon"),
+    ok.
+
+epmd_path() ->
+    ErtsBinDir = filename:dirname(escript:script_name()),
+    Name = "epmd",
+
+    case os:find_executable(Name, ErtsBinDir) of
+        false ->
+            case os:find_executable(Name) of
+                false ->
+                    io:format("Could not find epmd~n"),
+                    halt(1);
+                GlobalEpmd ->
+                    GlobalEpmd
+            end;                    
+        Epmd -> Epmd
+    end.
+
+nodename(Name) ->
+    case string:tokens(Name, "@") of
+        [_Node, _Host] ->
+            list_to_atom(Name);
+        [Node] ->
+            [_, Host] = string:tokens(atom_to_list(node()), "@"),
+            list_to_atom(lists:concat([Node, "@", Host]))
+    end.
+
+append_node_suffix(Name, Suffix) ->
+    case string:tokens(Name, "@") of
+        [Node, Host] ->
+            list_to_atom(lists:concat([Node, Suffix, os:getpid(), "@", Host]));
+        [Node] ->
+            list_to_atom(lists:concat([Node, Suffix, os:getpid()]))
+    end.
+
+% type_of(X) when is_integer(X) -> integer;
+% type_of(X) when is_float(X) -> float;
+% type_of(X) when is_list(X) -> list;
+% type_of(X) when is_tuple(X) -> tuple;
+% type_of(X) when is_bitstring(X) -> bitstring;
+% type_of(X) when is_binary(X) -> binary;
+% type_of(X) when is_boolean(X)   -> boolean;
+% type_of(X) when is_function(X)  -> function;
+% type_of(X) when is_pid(X)       -> pid;
+% type_of(X) when is_port(X)      -> port;
+% type_of(X) when is_reference(X) -> reference;
+% type_of(X) when is_atom(X)      -> atom;
+% type_of(_X)                     -> unknown.
