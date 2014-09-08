@@ -38,19 +38,7 @@ usage() ->
         [{"command", "Commands that will be executed"}]
     ).
 
-
-arguments_to_record([], State) ->
-    State;
-
-arguments_to_record([{Key, Value}|Rest], State) ->
-    arguments_to_record(Rest, State#state{Key=Value});
-
-arguments_to_record(_, _State) ->
-    badarg.
-
-
 parse_arguments(Options, NonOptArgs) ->
-    erlang:display(arguments_to_record(Options)),
     State = ?PROPS_TO_RECORD(Options, state),
     [Command|_] = NonOptArgs,
     State#state{command=Command}.
