@@ -3,45 +3,33 @@
 %%! -pa deps/*/ebin -Wall
 -module(fubarctl).
 
--record(state, {
-    command :: string(),
-
-    host :: string(),
-    cookie :: string(),
-    targetNode :: atom(),
-    ip :: string(),
-
-    username = undefined :: string(),
-    password = undefined :: string()
-}).
-
-
--define(PROPS_TO_RECORD(Props, Record), ?PROPS_TO_RECORD(Props, Record, #Record{})()).
--define(PROPS_TO_RECORD(Props, Record, Default),
-        fun() ->
-            Fields = record_info(fields, Record),
-            [Record | Defaults] = tuple_to_list(Default),
-            List = [proplists:get_value(F, Props, D) || {F, D} <- lists:zip(Fields, Defaults)],
-            list_to_tuple([Record | List])
-        end).
-
 add_paths() ->
     code:add_paths(filelib:wildcard("./deps/*/ebin", "./")).
 
+parse_arguments(["-name", TargetName | Rest], Acc, _) ->
+    ThisNode = append_node_suffix(TargetName, "_maint_"),
+    {ok, _} = net_kernel:start([ThisNode, longnames]),
+    parse_arguments(Rest, Acc, nodename(TargetName));
+
+parse_arguments(["-sname", TargetName | Rest], Acc, _) ->
+    ThisNode = append_node_suffix(TargetName, "_maint_"),
+    {ok, _} = net_kernel:start([ThisNode, shortnames]),
+    parse_arguments(Rest, Acc, nodename(TargetName));
+
+parse_arguments(["-cookie", Cookie | Rest], Acc, TargetNode) ->
+    erlang:set_cookie(node(), list_to_atom(Cookie)),
+    parse_arguments(Rest, Acc, TargetNode);
+
+parse_arguments([Arg | Rest], Acc, TargetNode) ->
+    parse_arguments(Rest, [Arg | Acc], TargetNode);
+
+parse_arguments([], Acc, TargetNode) ->
+    {lists:reverse(Acc), TargetNode}.
+
 usage() ->
-    OptionSpecList = option_spec_list(),
-    ScriptName = escript:script_name(),
-
-    getopt:usage(
-        OptionSpecList, ScriptName,
-        "[command ...]",
-        [{"command", "Commands that will be executed"}]
-    ).
-
-parse_arguments(Options, NonOptArgs) ->
-    State = ?PROPS_TO_RECORD(Options, state),
-    [Command|_] = NonOptArgs,
-    State#state{command=Command}.
+    Lines = [],
+    Usage = string:join(Lines, "\n"),
+    io:format(Usage).
 
 main([]) ->
     add_paths(),
@@ -51,93 +39,79 @@ main(Args) ->
     add_paths(),
     ok = start_epmd(),
 
-    OptSpecList = option_spec_list(),
+    {Parameters, TargetNode} = parse_arguments(Args, [], undefined),
 
-    %% FIXME: Check if the node is currently running or not.
-    case getopt:parse(OptSpecList, Args) of
-        {ok, {Options, NonOptArgs}} ->
-            erlang:display(Options),
-            erlang:display(NonOptArgs),
-            State = parse_arguments(Options, NonOptArgs),
-            case execute_command(State) of
-                {error, Msg} ->
-                    io:format("Error: ~s~n", [Msg]),
-                    usage();
-                {ok, Value} ->
-                    io:format("~p~n", [Value])
-            end;
-        {error, {Reason, Data}} ->
-            io:format("Error: ~s ~p~n~n", [Reason, Data]),
-            usage()
-    end.
+    case {net_kernel:hidden_connect_node(TargetNode),
+          net_adm:ping(TargetNode)} of
+        {true, pong} -> ok;
+        {false, pong} ->
+            io:format("Failed to connect to node ~p.~n", [TargetNode]),
+            halt(1);
+        {_, pang} ->
+            io:format("Node ~p not responding to pings.~n", [TargetNode]),
+            halt(1)
+    end,
 
-
-option_spec_list() ->
-    [
-        {host,      undefined, "host",      {string, "fubar"},  "Host name or IP address"},
-        {cookie,    undefined, "cookie",    {string, "fubar"},  "Cookie for the Erlang cluster"},
-        {username,  undefined, "username",  string,             "Username"},
-        {password,  undefined, "password",  string,             "Password"},
-        {ip,        undefined, "ip",        string,             "Internet Address"},
-        {help,      $h,        "help",      undefined,          "Show the program options"}
-    ].
-
-execute_command(#state{host=Hostname, cookie=Cookie}=State) ->
-    TargetNode = nodename(Hostname),
-    ThisNode = append_node_suffix(Hostname, "_maint_"),
-
-    {ok, _} = net_kernel:start([ThisNode, shortnames]),
-    erlang:set_cookie(node(), list_to_atom(Cookie)),
-
-    Result = command(State#state{targetNode=TargetNode}),
+    case command(Parameters, TargetNode) of
+        {ok, Result} ->
+            io:format("~p~n", [Result]);
+        {error, Error} ->
+            io:format("Error: ~p~n", [Error])
+    end,
 
     net_kernel:stop(),
 
-    Result.
+    ok.
 
-command(#state{command="getpid", targetNode=TargetNode}=_State) ->
-    Pid = rpc:call(TargetNode, os, getpid, []),
+
+command(["getpid"], Node) ->
+    Pid = rpc:call(Node, os, getpid, []),
     {ok, list_to_integer(Pid)};
 
-command(#state{command="state", targetNode=Node}=_State) ->
+command(["state"], Node) ->
     call_fubar_control(Node, [[Node, state]]);
 
-command(#state{command="acl-all", targetNode=Node}=_State) ->
+command(["acl-all"], Node) ->
     call_fubar_control(Node, [[Node, acl, all]]);
 
-command(#state{command="acl-get", targetNode=Node, ip=IpAddress}=_State) ->
+command(["acl-get", IpAddress], Node) ->
     call_fubar_control(Node, [[Node, acl, get, IpAddress]]);
 
-%% FIXME: Read the Allow value
-command(#state{command="acl-set", targetNode=Node, ip=IpAddress}=_State) ->
-    call_fubar_control(Node, [[Node, acl, set, IpAddress]]);
+command(["acl-set", IpAddress, Allow], Node) ->
+    Allow2 = parse_boolean(Allow),
+    call_fubar_control(Node, [[Node, acl, set, IpAddress, Allow2]]);
 
-command(#state{command="acl-del", targetNode=Node, ip=IpAddress}=_State) ->
+command(["acl-del", IpAddress], Node) ->
     call_fubar_control(Node, [[Node, acl, del, IpAddress]]);
 
-command(#state{command="account-all", targetNode=Node}=_State) ->
+command(["account-all"], Node) ->
     call_fubar_control(Node, [[Node, account, all]]);
 
-command(#state{command="account-get", targetNode=Node, username=Username}=_State) ->
+command(["account-get", Username], Node) ->
     call_fubar_control(Node, [[Node, account, get, Username]]);
 
-command(#state{command="account-set", targetNode=Node, username=Username, password=Password}=_State) ->
+command(["account-set", Username, Password], Node) ->
     call_fubar_control(Node, [[Node, account, set, Username, Password]]);
 
-command(#state{command="account-del", targetNode=Node, username=Username}=_State) ->
+command(["account-del", Username], Node) ->
     call_fubar_control(Node, [[Node, account, del, Username]]);
 
-% FIXME: Read the ClientID and the Active field from the command-line
-% command(#state{command=}=_State)) ->
-%     call_fubar_control(Node, [[Node, trace]])
+command(["trace", ClientId, Active], Node) ->
+    Active2 = parse_boolean(Active),
+    call_fubar_control(Node, [[Node, trace, ClientId, Active2]]);
 
-command(#state{command=BadCommand}=_State) ->
+command([BadCommand|_Rest], _) ->
     Message = io_lib:format("The command ~p does not exist", [BadCommand]),
     {error, list_to_binary(Message)}.
 
 call_fubar_control(Node, Args) ->
-    Result = rpc:call(Node, fubar_control, call, Args),
-    {ok, Result}.
+    case rpc:call(Node, fubar_control, call, Args) of
+        {badrpc, Reason} ->
+            io:format("RPC to ~p failed: ~p~n", [Node, Reason]),
+            halt(1);
+        Other ->
+            {ok, Other}
+    end.
 
 start_epmd() ->
     [] = os:cmd(epmd_path() ++ " -daemon"),
@@ -189,3 +163,16 @@ append_node_suffix(Name, Suffix) ->
 % type_of(X) when is_reference(X) -> reference;
 % type_of(X) when is_atom(X)      -> atom;
 % type_of(_X)                     -> unknown.
+
+parse_boolean(true) -> true;
+parse_boolean(false) -> false;
+parse_boolean(Val) when is_binary(Val) -> parse_boolean(binary_to_list(Val));
+
+parse_boolean(Val) ->
+    case string:to_lower(Val) of
+        "true" -> true;
+        "false" -> false;
+        _ ->
+            Msg = io_lib:format("Invalid boolean parameter: ~p", [Val]),
+            throw({query_parse_error, list_to_binary(Msg)})
+    end.
