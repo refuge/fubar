@@ -48,7 +48,8 @@ websocket_init(Transport, Req, Props) ->
 			self() ! {send, Reply},
 			{ok, Req, State#?MODULE{context=NewContext, timeout=Timeout}};
 		{noreply, NewContext, Timeout} ->
-			{ok, Req, State#?MODULE{context=NewContext, timeout=Timeout}};
+			Req2 = cowboy_req:set_resp_header(<<"sec-websocket-protocol">>, <<"mqttv3.1">>, Req),
+			{ok, Req2, State#?MODULE{context=NewContext, timeout=Timeout}};
 		{stop, Reason} ->
 			lager:debug("dispatch init failure ~p", [Reason]),
 			% Cowboy doesn't call websocket_terminate/3 in this case.
@@ -118,7 +119,7 @@ websocket_info(Info, Req, State=#?MODULE{dispatch=Dispatch, context=Context}) ->
 websocket_terminate(Reason, _Req, #?MODULE{dispatch=Dispatch, context=Context}) ->
 	lager:notice("websocket_terminate(~p)", [Reason]),
 	mqtt_stat:leave(connections),
-	Dispatch:terminate(Context),
+	Dispatch:terminate(Reason, Context),
 	ok.
 
 %%

@@ -32,10 +32,10 @@ start_listener(EnvPort, Settings, Fun) ->
 	Acceptors = Settings#?MODULE.acceptors,
 
 	case {Port, MaxConnections} of
-		{undefined, _} -> ok;
+		{undefined, _} -> no_port;
 		_ ->
 			case Fun(Port, Acceptors, MaxConnections, Options) of
-				{error, _} -> ok;
+				{error, _} -> error;
 				Started -> Started
 			end
 	end.
@@ -63,7 +63,8 @@ mqtts_listener(Port, Acceptors, MaxConnections, Options) ->
 http_listener(Port, Acceptors, MaxConnections, Options) ->
 	Dispatch = cowboy_router:compile([
 		{'_', [
-			{"/websocket", websocket_protocol, [{dispatch, mqtt_server}]}
+			{"/mqtt", websocket_protocol, [{dispatch, mqtt_server}]},
+			{"/[...]", cowboy_static, {priv_dir, fubar, ""}}
 		]}
 	]),
 

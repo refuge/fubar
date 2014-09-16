@@ -105,6 +105,7 @@ init(Params) ->
 	lager:debug("initializing with ~p", [Context]),
 	% Don't respond anything against tcp connection and apply small initial timeout.
 	{noreply, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout}.
+	% {ok, Context#?CONTEXT{timestamp=os:timestamp()}, Context#?CONTEXT.timeout}.
 
 -spec handle_message(mqtt_message(), context()) ->
 		  {reply, mqtt_message(), context(), timeout()} |
