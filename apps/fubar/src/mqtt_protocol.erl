@@ -29,6 +29,7 @@
 %%
 -export([start_link/4, server_init/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+-export([parse/1, format/1]).  %% exported for websocket_protocol
 
 -include("fubar.hrl").
 -include("mqtt.hrl").
@@ -391,61 +392,61 @@ code_change(V, State, Ex) ->
 parse(State=#?STATE{header=undefined, buffer= <<>>}) ->
 	% Not enough data to start parsing.
 	{more, State};
-parse(State=#?STATE{header=undefined, buffer=B}) ->
+parse(State=#?STATE{header=undefined, buffer=Buffer}) ->
 	% Read fixed header part and go on.
-	{Fixed, Rest} = read_fixed_header(B),
+	{Fixed, Rest} = read_fixed_header(Buffer),
 	parse(State#?STATE{header=Fixed, buffer=Rest});
-parse(State=#?STATE{header=H, buffer=B, max_packet_size=M})
-  when H#mqtt_header.size =:= undefined ->
+parse(State=#?STATE{header=Header, buffer=Buffer, max_packet_size=MaxPacketSize})
+  when Header#mqtt_header.size =:= undefined ->
 	% Read size part.
-	case decode_number(B) of
+	case decode_number(Buffer) of
 		{ok, N, Payload} ->
-			H1 = H#mqtt_header{size=N},
+			NewHeader = Header#mqtt_header{size=N},
 			case N of
-				_ when M < N+2 ->
-					{error, overflow, State#?STATE{header=H1}};
+				_ when MaxPacketSize < N+2 ->
+					{error, overflow, State#?STATE{header=NewHeader}};
 				_ ->
-					parse(State#?STATE{header=H1, buffer=Payload})
+					parse(State#?STATE{header=NewHeader, buffer=Payload})
 			end;
-		more when M < size(B)+1 ->
+		more when MaxPacketSize < size(Buffer)+1 ->
 			{error, overflow, State};
 		more ->
 			{more, State};
 		{error, Reason} ->
 			{error, Reason, State}
 	end;
-parse(State=#?STATE{header=H, buffer=B})
-  when size(B) >= H#mqtt_header.size ->
+parse(State=#?STATE{header=Header, buffer=Buffer})
+  when size(Buffer) >= Header#mqtt_header.size ->
 	% Ready to read payload.
-	case catch read_payload(H, B) of
-		{ok, Msg, Rest} ->
+	case catch read_payload(Header, Buffer) of
+		{ok, Message, Rest} ->
 			% Copy the buffer to prevent the binary from increasing indefinitely.
-			{ok, Msg, State#?STATE{header=undefined, buffer=Rest}};
+			{ok, Message, State#?STATE{header=undefined, buffer=Rest}};
 		{'EXIT', From, Reason} ->
 			{error, {'EXIT', From, Reason}}
 	end;
 parse(State) ->
 	{more, State}.
 
-decode_number(B) ->
-	split_number(B, <<>>).
+decode_number(Binary) ->
+	split_number(Binary, <<>>).
 
 split_number(<<>>, _) ->
 	more;
-split_number(<<1:1/unsigned, N:7/bitstring, Rest/binary>>, B) ->
-	split_number(Rest, <<B/binary, 0:1, N/bitstring>>);
-split_number(<<N:8/bitstring, Rest/binary>>, B) ->
-	{ok, read_number(<<B/binary, N/bitstring>>), Rest}.
+split_number(<<1:1/unsigned, N:7/bitstring, Rest/binary>>, Buffer) ->
+	split_number(Rest, <<Buffer/binary, 0:1, N/bitstring>>);
+split_number(<<N:8/bitstring, Rest/binary>>, Buffer) ->
+	{ok, read_number(<<Buffer/binary, N/bitstring>>), Rest}.
 
 read_number(<<>>) ->
 	0;
 read_number(<<N:8/big, T/binary>>) ->
 	N + 128*read_number(T).
 
-read_fixed_header(B) ->
+read_fixed_header(Buffer) ->
 	<<Type:4/big-unsigned, Dup:1/unsigned,
 	  QoS:2/big-unsigned, Retain:1/unsigned,
-	  Rest/binary>> = B,
+	  Rest/binary>> = Buffer,
 	{#mqtt_header{type=case Type of
 						   0 -> mqtt_reserved;
 						   1 -> mqtt_connect;
@@ -473,44 +474,44 @@ read_fixed_header(B) ->
 					  end,
 				  retain=(Retain =/= 0)}, Rest}.
 
-read_payload(H=#mqtt_header{type=T, size=S}, B) ->
+read_payload(Header=#mqtt_header{type=Type, size=Size}, Buffer) ->
 	% Need to split a payload first.
-	<<Payload:S/binary, Rest/binary>> = B,
-	Msg = 	case T of
+	<<Payload:Size/binary, Rest/binary>> = Buffer,
+	Message = case Type of
 				mqtt_reserved ->
-					read_reserved(H, binary:copy(Payload));
+					read_reserved(Header, binary:copy(Payload));
 				mqtt_connect ->
-					read_connect(H, binary:copy(Payload));
+					read_connect(Header, binary:copy(Payload));
 				mqtt_connack ->
-					read_connack(H, binary:copy(Payload));
+					read_connack(Header, binary:copy(Payload));
 				mqtt_publish ->
-					read_publish(H, binary:copy(Payload));
+					read_publish(Header, binary:copy(Payload));
 				mqtt_puback ->
-					read_puback(H, binary:copy(Payload));
+					read_puback(Header, binary:copy(Payload));
 				mqtt_pubrec ->
-					read_pubrec(H, binary:copy(Payload));
+					read_pubrec(Header, binary:copy(Payload));
 				mqtt_pubrel ->
-					read_pubrel(H, binary:copy(Payload));
+					read_pubrel(Header, binary:copy(Payload));
 				mqtt_pubcomp ->
-					read_pubcomp(H, binary:copy(Payload));
+					read_pubcomp(Header, binary:copy(Payload));
 				mqtt_subscribe ->
-					read_subscribe(H, binary:copy(Payload));
+					read_subscribe(Header, binary:copy(Payload));
 				mqtt_suback ->
-					read_suback(H, binary:copy(Payload));
+					read_suback(Header, binary:copy(Payload));
 				mqtt_unsubscribe ->
-					read_unsubscribe(H, binary:copy(Payload));
+					read_unsubscribe(Header, binary:copy(Payload));
 				mqtt_unsuback ->
-					read_unsuback(H, binary:copy(Payload));
+					read_unsuback(Header, binary:copy(Payload));
 				mqtt_pingreq ->
-					read_pingreq(H, binary:copy(Payload));
+					read_pingreq(Header, binary:copy(Payload));
 				mqtt_pingresp ->
-					read_pingresp(H, binary:copy(Payload));
+					read_pingresp(Header, binary:copy(Payload));
 				mqtt_disconnect ->
-					read_disconnect(H, binary:copy(Payload));
+					read_disconnect(Header, binary:copy(Payload));
 				_ ->
 					undefined
 			end,
-	{ok, Msg, binary:copy(Rest)}.
+	{ok, Message, binary:copy(Rest)}.
 
 read_connect(_Header,
 			 <<ProtocolLength:16/big-unsigned, Protocol:ProtocolLength/binary,
