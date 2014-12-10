@@ -451,7 +451,8 @@ handle_event(Event, State=#?STATE{handler=Handler}) ->
 terminate(normal, State=#?STATE{state=disconnecting, handler=Handler}) ->
 	Handler:handle_disconnected(State#?STATE.handler_state),
 	normal;
-terminate(Reason, _State) ->
+terminate(Reason, State=#?STATE{handler=Handler}) ->
+	Handler:handle_disconnected(State#?STATE.handler_state),
 	Reason.
 
 %%
